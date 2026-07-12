@@ -82,7 +82,7 @@ export interface BuildDocumentOptions {
  * per-scene block re-synthesis + phrase cap. Always rebuilt from scratch on text change;
  * word-click toggles mutate the resulting document in place instead (see toggleWord()).
  */
-export function buildAnimatedDocument(rawTextInput: string, options: BuildDocumentOptions): AnimatedDocument {
+export async function buildAnimatedDocument(rawTextInput: string, options: BuildDocumentOptions): Promise<AnimatedDocument> {
   const rawText = rawTextInput.slice(0, MAX_CHARACTERS)
   const preset = MODE_PRESETS[options.mode]
   // Font size is fixed per mode (never auto-shrunk to force a fit) — clamped defensively
@@ -94,7 +94,9 @@ export function buildAnimatedDocument(rawTextInput: string, options: BuildDocume
   const flatRuns = detectHighlights(rawText)
   const paragraphBlocks = splitIntoParagraphBlocks(flatRuns)
 
-  const ctx = createMeasurer()
+  // createMeasurer() awaits font readiness internally — nothing here measures text
+  // before the selected font has actually loaded.
+  const ctx = await createMeasurer()
   const allLines = wrapBlocksIntoLines(ctx, paragraphBlocks, metrics)
 
   const sceneLineGroups: WrappedLine[][] = [[]]
@@ -146,9 +148,9 @@ export function buildAnimatedDocument(rawTextInput: string, options: BuildDocume
 }
 
 /** Re-lays-out a single scene for rendering (no pagination — used by both preview and export). */
-export function layoutSceneForRender(doc: AnimatedDocument, scene: Scene) {
+export async function layoutSceneForRender(doc: AnimatedDocument, scene: Scene) {
   const metrics = metricsFor(doc.fontSize, doc.width, doc.height)
-  const ctx = createMeasurer()
+  const ctx = await createMeasurer()
   const lines = wrapBlocksIntoLines(ctx, scene.blocks, metrics)
   return positionLines(ctx, lines, metrics)
 }

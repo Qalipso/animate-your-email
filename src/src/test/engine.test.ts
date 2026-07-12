@@ -22,10 +22,10 @@ function buildStory(text: string) {
 }
 
 describe('retina display export', () => {
-  it('uses explicit logical dimensions regardless of devicePixelRatio', () => {
+  it('uses explicit logical dimensions regardless of devicePixelRatio', async () => {
     const originalDpr = (globalThis as any).devicePixelRatio
     ;(globalThis as any).devicePixelRatio = 3
-    const doc = buildAnimatedDocument('Short retina test', { mode: 'one-card', modeIsOverridden: true })
+    const doc = await buildAnimatedDocument('Short retina test', { mode: 'one-card', modeIsOverridden: true })
     const canvas = new (globalThis as any).OffscreenCanvas(doc.width, doc.height)
     expect(canvas.width).toBe(doc.width)
     expect(canvas.height).toBe(doc.height)
@@ -34,8 +34,8 @@ describe('retina display export', () => {
 })
 
 describe('very long words', () => {
-  it('hard-splits a word wider than the content box into multiple fitting chunks', () => {
-    const ctx = createMeasurer()
+  it('hard-splits a word wider than the content box into multiple fitting chunks', async () => {
+    const ctx = await createMeasurer()
     const metrics = metricsFor(26, 600, 400)
     const longWord = 'a'.repeat(120)
     const lines = wrapBlocksIntoLines(ctx, [{ id: 'b1', runs: [{ id: 'r1', text: longWord }] }], metrics)
@@ -49,8 +49,8 @@ describe('very long words', () => {
 })
 
 describe('multiple paragraphs', () => {
-  it('preserves every paragraph across scenes with no content lost', () => {
-    const doc = buildStory(LONG_PARAGRAPH_DOC)
+  it('preserves every paragraph across scenes with no content lost', async () => {
+    const doc = await buildStory(LONG_PARAGRAPH_DOC)
     expect(doc.scenes.length).toBeGreaterThan(1)
     const reconstructed = doc.scenes
       .flatMap((s) => s.blocks.flatMap((b) => b.runs.map((r) => r.text)))
@@ -64,79 +64,117 @@ describe('multiple paragraphs', () => {
 })
 
 describe('Cyrillic text', () => {
-  it('detects a Cyrillic markup phrase and wraps without throwing', () => {
+  it('detects a Cyrillic markup phrase and wraps without throwing', async () => {
     const text = 'Спасибо за встречу [[очень важное]] обновление для команды сегодня.'
     const runs = detectHighlights(text)
     const primary = runs.find((r) => r.highlight?.kind === 'markup-primary')
     expect(primary?.text).toBe('очень важное')
-    const doc = buildAnimatedDocument(text, { mode: 'paragraph', modeIsOverridden: true })
+    const doc = await buildAnimatedDocument(text, { mode: 'paragraph', modeIsOverridden: true })
     expect(doc.scenes[0].blocks.length).toBeGreaterThan(0)
+  })
+
+  it('handles ё/Ё distinctly from е/Е', () => {
+    const text = 'Ёлка и ёж встретили [[ежедневное]] чудо сегодня.'
+    const runs = detectHighlights(text)
+    const joined = runs.map((r) => r.text).join(' ')
+    expect(joined).toContain('Ёлка')
+    expect(joined).toContain('ёж')
   })
 })
 
 describe('emoji', () => {
-  it('keeps emoji intact as whole tokens through detection and layout', () => {
+  it('keeps emoji intact as whole tokens through detection and layout', async () => {
     const text = 'Great job team 🎉🚀 see you soon 😊'
     const runs = detectHighlights(text)
     const joined = runs.map((r) => r.text).join('')
     expect(joined).toContain('🎉🚀')
     expect(joined).toContain('😊')
-    const doc = buildAnimatedDocument(text, { mode: 'one-card', modeIsOverridden: true })
-    const layout = layoutSceneForRender(doc, doc.scenes[0])
+    const doc = await buildAnimatedDocument(text, { mode: 'one-card', modeIsOverridden: true })
+    const layout = await layoutSceneForRender(doc, doc.scenes[0])
     const words = layout.lines.flatMap((l) => l.words).map((w) => w.text)
     expect(words.some((w) => w.includes('🎉🚀'))).toBe(true)
+  })
+
+  it('does not corrupt ZWJ family emoji, skin-tone modifiers, or flag sequences', async () => {
+    const text = 'Team 👨‍👩‍👧‍👦 celebrated with 👍🏽 and flew the 🇺🇸 flag today.'
+    const runs = detectHighlights(text)
+    const joined = runs.map((r) => r.text).join('')
+    // Grapheme-safe reconstruction: every code point from the source must survive somewhere.
+    for (const cp of Array.from('👨‍👩‍👧‍👦👍🏽🇺🇸')) {
+      expect(joined).toContain(cp)
+    }
+    const doc = await buildAnimatedDocument(text, { mode: 'one-card', modeIsOverridden: true })
+    const layout = await layoutSceneForRender(doc, doc.scenes[0])
+    const rendered = layout.lines.flatMap((l) => l.words.map((w) => w.text)).join('')
+    expect(rendered).toContain('👨‍👩‍👧‍👦')
+    expect(rendered).toContain('👍🏽')
+    expect(rendered).toContain('🇺🇸')
+  })
+})
+
+describe('Unicode punctuation and spacing edge cases', () => {
+  it('handles em dash, non-breaking spaces, and combining marks without throwing', async () => {
+    const nbsp = ' '
+    const combining = 'éclair' // "éclair" via combining acute accent, not precomposed é
+    const text = `We shipped it — finally.${nbsp}Enjoy this ${combining} on us.`
+    const doc = await buildAnimatedDocument(text, { mode: 'one-card', modeIsOverridden: true })
+    const layout = await layoutSceneForRender(doc, doc.scenes[0])
+    const rendered = layout.lines.flatMap((l) => l.words.map((w) => w.text)).join(' ')
+    expect(rendered).toContain('—')
+    expect(rendered.replace(/\s+/g, ' ')).toContain(combining)
   })
 })
 
 describe('1500-character input', () => {
-  it('caps rawText at MAX_CHARACTERS even when given more', () => {
+  it('caps rawText at MAX_CHARACTERS even when given more', async () => {
     const overLong = 'word '.repeat(400) // ~2000 chars
     expect(overLong.length).toBeGreaterThan(MAX_CHARACTERS)
-    const doc = buildStory(overLong)
+    const doc = await buildStory(overLong)
     expect(doc.rawText.length).toBeLessThanOrEqual(MAX_CHARACTERS)
   })
 })
 
 describe('automatic pagination', () => {
-  it('splits long text into multiple scenes, none overflowing, and caps at MAX_SCENES', () => {
-    const doc = buildStory(LONG_PARAGRAPH_DOC)
+  it('splits long text into multiple scenes, none overflowing, and caps at MAX_SCENES', async () => {
+    const doc = await buildStory(LONG_PARAGRAPH_DOC)
     expect(doc.scenes.length).toBeGreaterThan(1)
     expect(doc.scenes.length).toBeLessThanOrEqual(MAX_SCENES)
     for (const scene of doc.scenes) {
-      const layout = layoutSceneForRender(doc, scene)
+      const layout = await layoutSceneForRender(doc, scene)
       expect(layout.overflowed).toBe(false)
     }
   })
 
-  it('flags truncated when content genuinely cannot fit in MAX_SCENES', () => {
+  it('flags truncated when content genuinely cannot fit in MAX_SCENES', async () => {
     const massive = Array.from({ length: 30 }, (_, i) => `Paragraph number ${i + 1} with several words of filler content to take up space.`).join('\n\n')
-    const doc = buildStory(massive.slice(0, MAX_CHARACTERS))
+    const doc = await buildStory(massive.slice(0, MAX_CHARACTERS))
     expect(doc.scenes.length).toBeLessThanOrEqual(MAX_SCENES)
     // Either it fit (unlikely at 1500 chars / 6 scenes) or it was marked truncated —
     // either way no scene should silently overflow.
     for (const scene of doc.scenes) {
-      expect(layoutSceneForRender(doc, scene).overflowed).toBe(false)
+      const layout = await layoutSceneForRender(doc, scene)
+      expect(layout.overflowed).toBe(false)
     }
   })
 })
 
 describe('animation ranges after text edits', () => {
-  it('does not leak toggle state between independently built documents', () => {
+  it('does not leak toggle state between independently built documents', async () => {
     const text = 'Thank you for the *soft emphasis* test today.'
-    const docA = buildAnimatedDocument(text, { mode: 'one-card', modeIsOverridden: true })
+    const docA = await buildAnimatedDocument(text, { mode: 'one-card', modeIsOverridden: true })
     const runA = docA.scenes[0].blocks.flatMap((b) => b.runs).find((r) => r.highlight?.kind === 'markup-soft')!
     const before = runA.highlight!.animated
     toggleRunAnimation(docA, runA.id)
     expect(runA.highlight!.animated).toBe(!before)
 
-    const docB = buildAnimatedDocument(text, { mode: 'one-card', modeIsOverridden: true })
+    const docB = await buildAnimatedDocument(text, { mode: 'one-card', modeIsOverridden: true })
     const runB = docB.scenes[0].blocks.flatMap((b) => b.runs).find((r) => r.highlight?.kind === 'markup-soft')!
     expect(runB.highlight!.animated).toBe(before) // fresh doc unaffected by docA's toggle
   })
 
-  it('rebuilding after an edit reflects the new text, not stale runs', () => {
-    const doc1 = buildAnimatedDocument('Version one of the message.', { mode: 'one-card', modeIsOverridden: true })
-    const doc2 = buildAnimatedDocument('Completely different version two.', { mode: 'one-card', modeIsOverridden: true })
+  it('rebuilding after an edit reflects the new text, not stale runs', async () => {
+    const doc1 = await buildAnimatedDocument('Version one of the message.', { mode: 'one-card', modeIsOverridden: true })
+    const doc2 = await buildAnimatedDocument('Completely different version two.', { mode: 'one-card', modeIsOverridden: true })
     const text1 = doc1.scenes[0].blocks.flatMap((b) => b.runs.map((r) => r.text)).join(' ')
     const text2 = doc2.scenes[0].blocks.flatMap((b) => b.runs.map((r) => r.text)).join(' ')
     expect(text1).not.toBe(text2)
@@ -145,9 +183,9 @@ describe('animation ranges after text edits', () => {
 })
 
 describe('exported frame dimensions', () => {
-  it('renders every timeline segment at exactly doc.width x doc.height with no clipping', () => {
-    const doc = buildStory(LONG_PARAGRAPH_DOC)
-    const timeline = buildTimeline(doc)
+  it('renders every timeline segment at exactly doc.width x doc.height with no clipping', async () => {
+    const doc = await buildStory(LONG_PARAGRAPH_DOC)
+    const timeline = await buildTimeline(doc)
     const canvas = new (globalThis as any).OffscreenCanvas(doc.width, doc.height)
     const ctx = canvas.getContext('2d')
 
@@ -164,11 +202,11 @@ describe('exported frame dimensions', () => {
 })
 
 describe('preview/export visual alignment', () => {
-  it('re-deriving a scene layout is deterministic (same result every call)', () => {
-    const doc = buildStory(LONG_PARAGRAPH_DOC)
+  it('re-deriving a scene layout is deterministic (same result every call)', async () => {
+    const doc = await buildStory(LONG_PARAGRAPH_DOC)
     const scene = doc.scenes[0]
-    const layoutA = layoutSceneForRender(doc, scene)
-    const layoutB = layoutSceneForRender(doc, scene)
+    const layoutA = await layoutSceneForRender(doc, scene)
+    const layoutB = await layoutSceneForRender(doc, scene)
     expect(layoutA.lines.length).toBe(layoutB.lines.length)
     expect(layoutA.totalWordCount).toBe(layoutB.totalWordCount)
     for (let i = 0; i < layoutA.lines.length; i++) {
@@ -183,10 +221,10 @@ describe('preview/export visual alignment', () => {
     }
   })
 
-  it('the layout used by pagination matches what the live preview re-derives for the same scene', () => {
-    const doc = buildStory(LONG_PARAGRAPH_DOC)
+  it('the layout used by pagination matches what the live preview re-derives for the same scene', async () => {
+    const doc = await buildStory(LONG_PARAGRAPH_DOC)
     for (const scene of doc.scenes) {
-      const layout = layoutSceneForRender(doc, scene)
+      const layout = await layoutSceneForRender(doc, scene)
       const wordsFromLayout = layout.lines.flatMap((l) => l.words.map((w) => w.text)).join(' ')
       const wordsFromModel = scene.blocks.flatMap((b) => b.runs.flatMap((r) => r.text.split(/\s+/))).join(' ')
       expect(wordsFromLayout.replace(/\s+/g, ' ')).toBe(wordsFromModel.replace(/\s+/g, ' '))

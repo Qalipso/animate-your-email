@@ -105,10 +105,20 @@ function drawEmphasisWord(
   }
 
   let scale = 1
+  let scaleX = 1
   let fontWeight = ''
   if (preset === 'gentle-pop') {
+    // Words in the same animated phrase (the common case — "great work", "crushed it")
+    // are laid out with normal-weight spacing, so scaling too far makes glyphs collide
+    // into the next word. Cap growth against the font's own measured space width rather
+    // than a guessed constant, so it self-corrects for any word length or loaded font.
     const bounceEase = easeOutBack(emphasisProgress)
-    scale = 1 + 0.16 * Math.sin(Math.min(1, bounceEase) * Math.PI)
+    const desiredScale = 1 + 0.16 * Math.sin(Math.min(1, bounceEase) * Math.PI)
+    ctx.font = `${fontSize}px ${FONT_FAMILY}`
+    const spaceWidth = ctx.measureText(' ').width
+    const maxGrowthPerSide = spaceWidth * 0.4
+    const maxScale = word.width > 0 ? 1 + (2 * maxGrowthPerSide) / word.width : desiredScale
+    scale = Math.min(desiredScale, maxScale)
   }
   if (preset === 'weight-shift') {
     fontWeight = emphasisProgress < 0.55 ? '700 ' : ''
@@ -118,11 +128,21 @@ function drawEmphasisWord(
   ctx.font = `${fontWeight}${fontSize}px ${FONT_FAMILY}`
   ctx.textBaseline = 'alphabetic'
 
-  if (scale !== 1) {
+  if (fontWeight) {
+    // Bold measures wider than the normal-weight width the layout reserved for this word.
+    // Compress horizontally to fit back inside that slot so it can't collide with the next
+    // word — measured live so it holds regardless of font metrics or word length.
+    const boldWidth = ctx.measureText(word.text).width
+    if (boldWidth > word.width && boldWidth > 0) {
+      scaleX = word.width / boldWidth
+    }
+  }
+
+  if (scale !== 1 || scaleX !== 1) {
     const cx = x + word.width / 2
     const cy = yBaseline - fontSize * 0.35
     ctx.translate(cx, cy)
-    ctx.scale(scale, scale)
+    ctx.scale(scale * scaleX, scale)
     ctx.translate(-cx, -cy)
   }
   ctx.fillText(word.text, x, yBaseline)

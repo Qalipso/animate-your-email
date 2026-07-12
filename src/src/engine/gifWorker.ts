@@ -10,10 +10,10 @@ export interface GifWorkerRequest {
 
 // Runs entirely off the main thread: layout + render + gifenc encode all happen here,
 // per the "GIF through gifenc in a Web Worker" requirement.
-self.onmessage = (e: MessageEvent<GifWorkerRequest>) => {
+self.onmessage = async (e: MessageEvent<GifWorkerRequest>) => {
   try {
     const { doc, fps } = e.data
-    const timeline = buildTimeline(doc)
+    const timeline = await buildTimeline(doc)
     const canvas = new OffscreenCanvas(doc.width, doc.height)
     const ctx = canvas.getContext('2d') as OffscreenCanvasRenderingContext2D
 

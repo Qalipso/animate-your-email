@@ -1,10 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { buildAnimatedDocument, layoutSceneForRender, toggleRunAnimation } from './engine/document'
-import { exportAllScenesAsPngSequence, exportDocumentAsGif, exportSceneAsPng } from './engine/exportV2'
+import { cancelExport, exportDocumentAsGif, exportScenesAsZip, exportSceneAsPng, ExportCancelledError } from './engine/exportV2'
 import { autoSelectMode } from './engine/modeSelect'
 import { computeSceneTiming, renderScene } from './engine/render'
 import { PADDING } from './engine/layout'
-import type { AnimatedDocument, EntrancePresetId, OutputMode, TransitionPresetId } from './engine/model'
+import type { AnimatedDocument, EntrancePresetId, OutputMode, TextLayout, TransitionPresetId } from './engine/model'
 import { MAX_CHARACTERS } from './engine/model'
 import './App.css'
 
@@ -41,27 +41,50 @@ function App() {
   const [sceneIndex, setSceneIndex] = useState(0)
   const [version, setVersion] = useState(0)
   const [status, setStatus] = useState('')
+  const [isGenerating, setIsGenerating] = useState(false)
   const [isExporting, setIsExporting] = useState(false)
   const [exportMenuOpen, setExportMenuOpen] = useState(false)
+  const [layout, setLayout] = useState<TextLayout | null>(null)
 
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
   const rafRef = useRef<number | null>(null)
 
   const effectiveMode = modeOverride ?? autoSelectMode(rawText)
   const scene = doc?.scenes[sceneIndex] ?? null
-  const layout = useMemo(() => (doc && scene ? layoutSceneForRender(doc, scene) : null), [doc, scene, version])
 
-  function handleGeneratePreview() {
-    const built = buildAnimatedDocument(rawText, {
-      mode: effectiveMode,
-      modeIsOverridden: modeOverride !== null,
-      entrance,
-      transition,
+  // Re-derive the current scene's layout whenever the doc, scene, or a toggle
+  // (`version`) changes. Async because layoutSceneForRender awaits font readiness.
+  useEffect(() => {
+    let cancelled = false
+    if (!doc || !scene) {
+      setLayout(null)
+      return
+    }
+    layoutSceneForRender(doc, scene).then((l) => {
+      if (!cancelled) setLayout(l)
     })
-    setDoc(built)
-    setSceneIndex(0)
-    setVersion((v) => v + 1)
-    setStatus(built.truncated ? `Preview ready — text was too long, kept the first ${built.scenes.length} scenes.` : 'Preview ready.')
+    return () => {
+      cancelled = true
+    }
+  }, [doc, scene, version])
+
+  async function handleGeneratePreview() {
+    setIsGenerating(true)
+    setStatus('Preparing preview…')
+    try {
+      const built = await buildAnimatedDocument(rawText, {
+        mode: effectiveMode,
+        modeIsOverridden: modeOverride !== null,
+        entrance,
+        transition,
+      })
+      setDoc(built)
+      setSceneIndex(0)
+      setVersion((v) => v + 1)
+      setStatus(built.truncated ? `Preview ready — text was too long, kept the first ${built.scenes.length} scenes.` : 'Preview ready.')
+    } finally {
+      setIsGenerating(false)
+    }
   }
 
   // Live preview: play the current scene's animation once and settle, driven by the
@@ -123,10 +146,18 @@ function App() {
       triggerDownload(blob, 'animation.gif')
       setStatus(`Downloaded — ${(blob.size / 1024).toFixed(0)} KB`)
     } catch (err) {
-      setStatus(`Export failed: ${(err as Error).message}`)
+      if (err instanceof ExportCancelledError) {
+        setStatus('Export cancelled.')
+      } else {
+        setStatus(`Export failed: ${(err as Error).message}`)
+      }
     } finally {
       setIsExporting(false)
     }
+  }
+
+  function handleCancelExport() {
+    cancelExport()
   }
 
   async function handleExportPng() {
@@ -136,11 +167,11 @@ function App() {
     triggerDownload(blob, `scene-${sceneIndex + 1}.png`)
   }
 
-  async function handleExportPngSequence() {
+  async function handleExportZip() {
     if (!doc) return
     setExportMenuOpen(false)
-    const files = await exportAllScenesAsPngSequence(doc)
-    files.forEach((f) => triggerDownload(f.blob, f.name))
+    const blob = await exportScenesAsZip(doc)
+    triggerDownload(blob, 'scenes.zip')
   }
 
   const animatedRuns = useMemo(() => {
@@ -196,7 +227,9 @@ function App() {
       </div>
 
       <div className="actions">
-        <button className="primary" onClick={handleGeneratePreview}>Generate Preview</button>
+        <button className="primary" onClick={handleGeneratePreview} disabled={isGenerating}>
+          {isGenerating ? 'Preparing…' : 'Generate Preview'}
+        </button>
       </div>
 
       {doc && scene && (
@@ -247,12 +280,15 @@ function App() {
             <button className="primary" onClick={handleDownloadGif} disabled={isExporting}>
               {isExporting ? 'Rendering…' : 'Download GIF'}
             </button>
+            {isExporting && (
+              <button className="preset" onClick={handleCancelExport}>Cancel</button>
+            )}
             <div className="export-menu-wrap">
               <button className="preset" onClick={() => setExportMenuOpen((v) => !v)}>Export ▾</button>
               {exportMenuOpen && (
                 <div className="export-menu">
                   <button onClick={handleExportPng}>PNG (current scene)</button>
-                  <button onClick={handleExportPngSequence}>PNG sequence (all scenes)</button>
+                  <button onClick={handleExportZip}>ZIP (all scenes, PNG)</button>
                 </div>
               )}
             </div>

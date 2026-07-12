@@ -33,11 +33,11 @@ export interface Timeline {
   totalMs: number
 }
 
-/** Builds the full document timeline: each scene's own animation, with a transition segment inserted between consecutive scenes. Pure/serializable-input-safe so it can run on the main thread or inside a Web Worker. */
-export function buildTimeline(doc: AnimatedDocument): Timeline {
+/** Builds the full document timeline: each scene's own animation, with a transition segment inserted between consecutive scenes. Pure/serializable-input-safe so it can run on the main thread or inside a Web Worker. Layout (and its font-readiness gate) is resolved once here; renderTimelineFrame below stays synchronous so the per-frame export loop doesn't pay a repeated async cost. */
+export async function buildTimeline(doc: AnimatedDocument): Promise<Timeline> {
   const segments: Segment[] = []
   let cursor = 0
-  const layouts = doc.scenes.map((s) => layoutSceneForRender(doc, s))
+  const layouts = await Promise.all(doc.scenes.map((s) => layoutSceneForRender(doc, s)))
   const timings = doc.scenes.map((s, i) => computeSceneTiming(layouts[i], s.entrance))
 
   doc.scenes.forEach((scene, i) => {

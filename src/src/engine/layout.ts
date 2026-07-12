@@ -1,5 +1,6 @@
 import type { HighlightSpec, LayoutLine, LayoutWord, TextBlock, TextLayout } from './model'
 import { MIN_READABLE_FONT_PX } from './model'
+import { waitForFontsReady } from './fontReady'
 
 export const PADDING = 32
 export const FONT_FAMILY = '-apple-system, "Helvetica Neue", Arial, sans-serif'
@@ -25,8 +26,14 @@ export function metricsFor(fontSize: number, width: number, height: number): Lay
   }
 }
 
-/** A canvas 2D context used purely for text measurement (never drawn to). */
-export function createMeasurer(): Ctx2D {
+/**
+ * A canvas 2D context used purely for text measurement (never drawn to). Awaits font
+ * readiness first — measuring or wrapping against a not-yet-loaded font produces wrong
+ * widths (typically the fallback font's metrics), so every caller that creates a fresh
+ * measurer gets the guarantee for free rather than needing to remember to await it.
+ */
+export async function createMeasurer(): Promise<Ctx2D> {
+  await waitForFontsReady()
   const canvas = typeof OffscreenCanvas !== 'undefined' ? new OffscreenCanvas(10, 10) : document.createElement('canvas')
   const ctx = canvas.getContext('2d') as Ctx2D | null
   if (!ctx) throw new Error('2d context unavailable for text measurement')
