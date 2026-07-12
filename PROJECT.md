@@ -7,7 +7,7 @@
 | **Goal** | Turn typed text into a short animated GIF for pasting into emails (Gmail/Outlook) |
 | **Brain** | `~/Documents/ClaudeBrain` (shared) |
 | **Knowledge (Obsidian)** | `ClaudeBrain/vault/Projects/animate-your-email` |
-| **Status** | V1 vertical slice implemented (2 of 30 presets, Download GIF only — `src/`) |
+| **Status** | V1 all 30 presets implemented, Download GIF working (`src/`); Copy animation not yet built (see DEC-005) |
 
 ## Stack
 V1: React + Fabric.js (editable text-on-canvas) + GSAP/SplitText (animation) + `gifenc`

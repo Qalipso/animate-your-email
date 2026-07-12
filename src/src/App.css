@@ -60,6 +60,32 @@
   font-weight: 600;
 }
 
+.drawer {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 16px;
+  margin-bottom: 24px;
+  text-align: left;
+}
+
+.drawer-category h3 {
+  font-size: 13px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text);
+  margin: 12px 0 8px;
+}
+
+.drawer-category:first-child h3 {
+  margin-top: 0;
+}
+
+.drawer-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
 .actions {
   margin-bottom: 12px;
 }
