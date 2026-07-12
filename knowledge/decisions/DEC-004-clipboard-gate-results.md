@@ -1,9 +1,9 @@
 ---
 type: decision
 tags: [decision, investigation, risk, results]
-status: in-progress
+status: paused
 ---
-# DEC-004 — Clipboard gate: test matrix results (in progress)
+# DEC-004 — Clipboard gate: test matrix results (paused, Gmail leg conclusive)
 
 Live results for the spike defined in [[DEC-002-investigation-findings]] §2. Spike page:
 `spike/clipboard-gate/index.html`, served locally over HTTP (Clipboard API requires a
@@ -102,8 +102,18 @@ sending · renders correctly for recipient in Gmail and Outlook · survives afte
 tab closed · sent email kept the CDN URL / proxied it / converted to inline attachment.
 Screenshot each result and link it here.
 
-## Status
-Stage 0 done. Stage 1: Chrome×Gmail×Strategy 1 done with a conclusive and important
-result (external URL preserved, not re-hosted). Chrome×Gmail×Strategy 2 inconclusive
-(clipboard race). Outlook Web, Strategy 3, and both Safari cells not yet run. No editor
+### Chrome/macOS × Outlook Web — blocked, not a technical finding
+No Microsoft/Outlook account was logged into the test browser. Signing into an account
+is outside what the assistant does on the user's behalf (credential entry is off-limits
+regardless of who's asked). **Paused by user decision 2026-07-12**, not attempted further
+this round. Remains `[Not verified]`.
+
+## Status — paused here by user decision, not because the gate is fully answered
+Stage 0 done. Stage 1: Chrome×Gmail confirmed for both Strategy 1 and Strategy 2 —
+**consistent, conclusive result: Gmail Web/Chrome does not re-host a pasted external
+image under either copy mechanism tested.** This is enough evidence to act on
+[[DEC-005-privacy-first-delivery-pivot]]'s architecture call. Outlook Web (blocked on
+no logged-in account), Strategy 3 (manual control case), and both Safari cells remain
+`[Not verified]` — pick these up before shipping "Copy animation" as a claim that covers
+Outlook or Safari users, since Gmail's result doesn't generalize automatically. No editor
 or render pipeline code has been written.
