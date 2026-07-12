@@ -1,6 +1,6 @@
 .app {
   width: 100%;
-  max-width: 680px;
+  max-width: 640px;
   padding: 40px 20px;
   box-sizing: border-box;
   text-align: center;
@@ -34,30 +34,31 @@
   margin: 4px 2px 16px;
 }
 
-.controls-row {
+/* Step 2 of the flow: a small, clearly-named set of templates — buttons, not a
+   dropdown, so the choice is visible at a glance instead of hidden behind a click. */
+.template-picker {
   display: flex;
-  gap: 12px;
-  flex-wrap: wrap;
+  gap: 8px;
   justify-content: center;
+  flex-wrap: wrap;
   margin-bottom: 20px;
 }
 
-.select-field {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  font-size: 12px;
+.template-option {
+  font-size: 14px;
+  padding: 8px 16px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: transparent;
   color: var(--text);
-  text-align: left;
+  cursor: pointer;
 }
 
-.select-field select {
-  font-size: 14px;
-  padding: 8px 10px;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  background: var(--bg);
-  color: var(--text-h);
+.template-option.active {
+  border-color: var(--accent);
+  background: rgba(43, 108, 255, 0.1);
+  color: var(--accent);
+  font-weight: 600;
 }
 
 .preview-frame {
@@ -66,7 +67,7 @@
   border-radius: 8px;
   display: inline-block;
   overflow: hidden;
-  margin-bottom: 16px;
+  margin-bottom: 12px;
 }
 
 .preview-frame canvas {
@@ -83,6 +84,11 @@
 .hint {
   font-size: 12px;
   color: var(--text);
+  margin: 0 0 16px;
+}
+
+.empty-state {
+  padding: 48px 0;
   margin: 0 0 8px;
 }
 
@@ -123,8 +129,25 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 12px;
-  margin-bottom: 16px;
+  gap: 10px;
+  margin-bottom: 20px;
+}
+
+.scene-arrow {
+  font-size: 16px;
+  width: 24px;
+  height: 24px;
+  border: none;
+  background: transparent;
+  color: var(--text);
+  cursor: pointer;
+  padding: 0;
+  line-height: 1;
+}
+
+.scene-arrow:disabled {
+  opacity: 0.3;
+  cursor: default;
 }
 
 .scene-dots {
@@ -133,8 +156,8 @@
 }
 
 .scene-dot {
-  width: 8px;
-  height: 8px;
+  width: 7px;
+  height: 7px;
   border-radius: 50%;
   border: none;
   background: var(--border);
@@ -151,7 +174,6 @@
   flex-wrap: wrap;
   gap: 8px;
   justify-content: center;
-  margin-bottom: 20px;
 }
 
 .chip {
@@ -171,34 +193,72 @@
   font-weight: 600;
 }
 
-.preset {
-  font-size: 14px;
-  padding: 8px 16px;
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  background: transparent;
-  color: var(--text);
-  cursor: pointer;
-}
-
-.preset:disabled {
-  opacity: 0.4;
-  cursor: default;
-}
-
 .actions {
-  margin-bottom: 12px;
+  margin-bottom: 10px;
 }
 
-.export-actions {
+.primary-actions {
   display: flex;
   gap: 10px;
   justify-content: center;
   align-items: center;
+  flex-wrap: wrap;
+}
+
+/* "Copy GIF" is the strongest call-to-action on the screen — the whole point of this
+   pass is that copying, not saving, is the primary way out of the tool. */
+.cta-primary {
+  font-size: 17px;
+  font-weight: 700;
+  padding: 14px 32px;
+  border: none;
+  border-radius: 10px;
+  background: var(--accent);
+  color: #fff;
+  cursor: pointer;
+  box-shadow: 0 2px 10px rgba(43, 108, 255, 0.35);
+}
+
+.cta-primary:disabled {
+  opacity: 0.6;
+  cursor: default;
+  box-shadow: none;
+}
+
+/* "Save GIF" — available, but visibly secondary next to Copy GIF. */
+.cta-secondary {
+  font-size: 15px;
+  font-weight: 600;
+  padding: 13px 22px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: transparent;
+  color: var(--text-h);
+  cursor: pointer;
+}
+
+.cta-secondary:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+/* Cancel / "More export options" — plain text-weight links, the least visually
+   prominent tier, exactly where PNG/ZIP/advanced export belongs by default. */
+.cta-text {
+  font-size: 13px;
+  padding: 6px 4px;
+  border: none;
+  background: transparent;
+  color: var(--text);
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 2px;
 }
 
 .export-menu-wrap {
   position: relative;
+  display: inline-block;
+  margin: 8px 0 4px;
 }
 
 .export-menu {
@@ -232,23 +292,65 @@
   background: rgba(127, 127, 127, 0.1);
 }
 
-.primary {
-  font-size: 16px;
-  font-weight: 600;
-  padding: 12px 28px;
-  border: none;
-  border-radius: 8px;
-  background: var(--accent);
-  color: #fff;
-  cursor: pointer;
+/* Advanced controls, collapsed by default (native <details> — no JS needed). This is
+   where Transition and the phrase-toggle chips live instead of cluttering the main
+   screen; most people never need to open it. */
+.customize {
+  margin-top: 20px;
+  text-align: left;
+  border-top: 1px solid var(--border);
+  padding-top: 14px;
 }
 
-.primary:disabled {
-  opacity: 0.6;
-  cursor: default;
+.customize summary {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+  cursor: pointer;
+  text-align: center;
+  list-style: none;
+}
+
+.customize summary::-webkit-details-marker {
+  display: none;
+}
+
+.customize summary::after {
+  content: ' ▾';
+}
+
+.customize[open] summary::after {
+  content: ' ▴';
+}
+
+.customize-body {
+  margin-top: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  align-items: center;
+}
+
+.select-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--text);
+  text-align: left;
+}
+
+.select-field select {
+  font-size: 14px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg);
+  color: var(--text-h);
 }
 
 .status {
   font-size: 14px;
   color: var(--text);
+  margin-top: 12px;
 }

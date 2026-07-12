@@ -13,7 +13,6 @@ import { PADDING } from './engine/layout'
 import type {
   AnimatedDocument,
   EmphasisPresetId,
-  EntrancePresetId,
   LayoutWord,
   OutputMode,
   TextLayout,
@@ -22,11 +21,13 @@ import type {
 import { MAX_CHARACTERS } from './engine/model'
 import './App.css'
 
-const ENTRANCE_OPTIONS: { id: EntrancePresetId; name: string }[] = [
-  { id: 'fade', name: 'Fade' },
-  { id: 'soft-rise', name: 'Soft Rise' },
-  { id: 'blur-reveal', name: 'Blur Reveal' },
-  { id: 'word-cascade', name: 'Word Cascade' },
+const GENERATE_DEBOUNCE_MS = 400
+
+const TEMPLATE_OPTIONS: { id: OutputMode | 'auto'; name: string }[] = [
+  { id: 'auto', name: 'Auto' },
+  { id: 'one-card', name: 'Card' },
+  { id: 'paragraph', name: 'Paragraph' },
+  { id: 'story', name: 'Story' },
 ]
 
 const EMPHASIS_OPTIONS: { id: EmphasisPresetId; name: string }[] = [
@@ -38,10 +39,13 @@ const EMPHASIS_OPTIONS: { id: EmphasisPresetId; name: string }[] = [
   { id: 'weight-shift', name: 'Weight Shift' },
   { id: 'burn', name: 'Burn' },
   { id: 'wash-away', name: 'Wash Away' },
-  { id: 'pixelate', name: 'Pixelate' },
-  { id: 'assemble-blur', name: 'Assemble from Blur' },
   { id: 'bow-highlight', name: 'Pink Highlight + Bow' },
   { id: 'glitch', name: 'Glitch' },
+]
+
+const TRANSITION_OPTIONS: { id: TransitionPresetId; name: string }[] = [
+  { id: 'crossfade', name: 'Crossfade' },
+  { id: 'slide-up', name: 'Slide Up' },
 ]
 
 /** Finds the line/word nearest a point — forgiving hit test used while extending a drag selection. */
@@ -88,17 +92,6 @@ function hitTestWordStrict(layout: TextLayout, x: number, y: number): number | n
   return null
 }
 
-const TRANSITION_OPTIONS: { id: TransitionPresetId; name: string }[] = [
-  { id: 'crossfade', name: 'Crossfade' },
-  { id: 'slide-up', name: 'Slide Up' },
-]
-
-const MODE_OPTIONS: { id: OutputMode; name: string }[] = [
-  { id: 'one-card', name: 'One Card' },
-  { id: 'paragraph', name: 'Paragraph' },
-  { id: 'story', name: 'Story' },
-]
-
 const SAMPLE_TEXT =
   'Thank you for joining us at the *product launch* today.\n\n' +
   'We announced [[three major updates]] and shared a live demo with over 200 attendees on July 12, 2026.\n\n' +
@@ -108,13 +101,13 @@ const SAMPLE_TEXT =
 function App() {
   const [rawText, setRawText] = useState(SAMPLE_TEXT)
   const [modeOverride, setModeOverride] = useState<OutputMode | null>(null)
-  const [entrance, setEntrance] = useState<EntrancePresetId>('fade')
   const [transition, setTransition] = useState<TransitionPresetId>('crossfade')
   const [doc, setDoc] = useState<AnimatedDocument | null>(null)
   const [sceneIndex, setSceneIndex] = useState(0)
   const [version, setVersion] = useState(0)
   const [status, setStatus] = useState('')
   const [isGenerating, setIsGenerating] = useState(false)
+  const [isCopying, setIsCopying] = useState(false)
   const [isExporting, setIsExporting] = useState(false)
   const [exportMenuOpen, setExportMenuOpen] = useState(false)
   const [layout, setLayout] = useState<TextLayout | null>(null)
@@ -139,9 +132,42 @@ function App() {
   // the overlay-redraw effect.
   const selectionRef = useRef<{ start: number; end: number } | null>(null)
   const contextMenuRef = useRef<HTMLDivElement | null>(null)
+  // Guards against an in-flight generation from an earlier (superseded) text/template
+  // change resolving after a newer one and clobbering it with stale content.
+  const generationIdRef = useRef(0)
 
   const effectiveMode = modeOverride ?? autoSelectMode(rawText)
   const scene = doc?.scenes[sceneIndex] ?? null
+
+  // Auto-generate the preview whenever the text or template settings change — no
+  // separate "Generate" step. Debounced so it doesn't rebuild on every keystroke.
+  useEffect(() => {
+    if (!rawText.trim()) {
+      setDoc(null)
+      setStatus('')
+      setIsGenerating(false)
+      return
+    }
+    setIsGenerating(true)
+    const timer = setTimeout(() => {
+      const genId = ++generationIdRef.current
+      buildAnimatedDocument(rawText, {
+        mode: effectiveMode,
+        modeIsOverridden: modeOverride !== null,
+        entrance: 'fade',
+        transition,
+      }).then((built) => {
+        if (generationIdRef.current !== genId) return // superseded by a newer change
+        setDoc(built)
+        setSceneIndex(0)
+        setVersion((v) => v + 1)
+        setStatus(built.truncated ? `Kept the first ${built.scenes.length} scenes — text was too long to fit more.` : '')
+        setIsGenerating(false)
+      })
+    }, GENERATE_DEBOUNCE_MS)
+    return () => clearTimeout(timer)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rawText, effectiveMode, modeOverride, transition])
 
   // Re-derive the current scene's layout whenever the doc, scene, or a toggle
   // (`version`) changes. Async because layoutSceneForRender awaits font readiness.
@@ -162,25 +188,6 @@ function App() {
       cancelled = true
     }
   }, [doc, scene, version])
-
-  async function handleGeneratePreview() {
-    setIsGenerating(true)
-    setStatus('Preparing preview…')
-    try {
-      const built = await buildAnimatedDocument(rawText, {
-        mode: effectiveMode,
-        modeIsOverridden: modeOverride !== null,
-        entrance,
-        transition,
-      })
-      setDoc(built)
-      setSceneIndex(0)
-      setVersion((v) => v + 1)
-      setStatus(built.truncated ? `Preview ready — text was too long, kept the first ${built.scenes.length} scenes.` : 'Preview ready.')
-    } finally {
-      setIsGenerating(false)
-    }
-  }
 
   // Live preview: play the current scene's animation once and settle, driven by the
   // exact same renderScene()/computeSceneTiming() used for export.
@@ -253,10 +260,10 @@ function App() {
     }
   }, [contextMenu])
 
-  // Clamp the menu into the viewport — with 12 presets it's taller than the old 6-item
-  // version and can otherwise render partly (or entirely) below the fold with no way to
-  // reach the rest, since it's position:fixed and scrolling the page doesn't move it.
-  // useLayoutEffect so the reposition happens before paint, with no visible jump.
+  // Clamp the menu into the viewport — with 10 presets it can otherwise render partly
+  // (or entirely) below the fold with no way to reach the rest, since it's
+  // position:fixed and scrolling the page doesn't move it. useLayoutEffect so the
+  // reposition happens before paint, with no visible jump.
   useLayoutEffect(() => {
     const el = contextMenuRef.current
     if (!el || !contextMenu) return
@@ -360,14 +367,56 @@ function App() {
     setVersion((v) => v + 1)
   }
 
-  async function handleDownloadGif() {
+  /** Primary action: generate the GIF and copy it straight to the clipboard for pasting into an email. */
+  async function handleCopyGif() {
+    if (!doc || !scene) return
+    setIsCopying(true)
+    try {
+      if (typeof ClipboardItem === 'undefined' || !navigator.clipboard?.write) {
+        throw new Error('Copying images isn’t supported in this browser — use Save GIF instead.')
+      }
+      // Verified in-browser (Chromium): the Async Clipboard API's image write only
+      // accepts image/png and image/svg+xml — image/gif is rejected outright, so an
+      // animated GIF genuinely cannot be put on the clipboard from a web page today.
+      // Fall back to copying this scene's settled frame as a static PNG instead of
+      // just failing, and say so plainly rather than silently pasting something that
+      // quietly isn't animated.
+      const gifSupported = typeof ClipboardItem.supports !== 'function' || ClipboardItem.supports('image/gif')
+      if (gifSupported) {
+        setStatus('Preparing GIF to copy…')
+        const gifPromise = exportDocumentAsGif(doc, 12)
+        // Passing a Promise (not an already-resolved Blob) keeps this write() call
+        // itself synchronous within the click handler, which Safari requires to honor
+        // the user gesture for clipboard permission — write() awaits it internally.
+        await navigator.clipboard.write([new ClipboardItem({ 'image/gif': gifPromise })])
+        const blob = await gifPromise
+        setStatus(`Copied — ${(blob.size / 1024).toFixed(0)} KB. Paste it into your email.`)
+      } else {
+        setStatus('This browser can’t copy animated GIFs — copying a static image instead…')
+        const pngPromise = exportSceneAsPng(doc, scene)
+        await navigator.clipboard.write([new ClipboardItem({ 'image/png': pngPromise })])
+        const blob = await pngPromise
+        setStatus(`Copied a static image — ${(blob.size / 1024).toFixed(0)} KB. This browser can’t copy animated GIFs to the clipboard; use Save GIF for the animated file.`)
+      }
+    } catch (err) {
+      if (err instanceof ExportCancelledError) {
+        setStatus('Export cancelled.')
+      } else {
+        setStatus(`Copy failed: ${(err as Error).message}`)
+      }
+    } finally {
+      setIsCopying(false)
+    }
+  }
+
+  async function handleSaveGif() {
     if (!doc) return
     setIsExporting(true)
     setStatus('Rendering GIF in the background…')
     try {
       const blob = await exportDocumentAsGif(doc, 12)
       triggerDownload(blob, 'animation.gif')
-      setStatus(`Downloaded — ${(blob.size / 1024).toFixed(0)} KB`)
+      setStatus(`Saved — ${(blob.size / 1024).toFixed(0)} KB.`)
     } catch (err) {
       if (err instanceof ExportCancelledError) {
         setStatus('Export cancelled.')
@@ -403,6 +452,8 @@ function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [scene, version])
 
+  const busy = isCopying || isExporting
+
   return (
     <div className="app">
       <h1>Animate your email</h1>
@@ -412,52 +463,28 @@ function App() {
         value={rawText}
         onChange={(e) => setRawText(e.target.value.slice(0, MAX_CHARACTERS))}
         placeholder="Paste your email or message…"
-        rows={6}
+        rows={5}
       />
       <div className="char-count">{rawText.length} / {MAX_CHARACTERS}</div>
 
-      <div className="controls-row">
-        <label className="select-field">
-          Output
-          <select
-            value={modeOverride ?? `auto:${effectiveMode}`}
-            onChange={(e) => setModeOverride(e.target.value.startsWith('auto') ? null : (e.target.value as OutputMode))}
-          >
-            <option value={`auto:${effectiveMode}`}>Auto ({MODE_OPTIONS.find((m) => m.id === effectiveMode)?.name})</option>
-            {MODE_OPTIONS.map((m) => (
-              <option key={m.id} value={m.id}>{m.name}</option>
-            ))}
-          </select>
-        </label>
-
-        <label className="select-field">
-          Entrance
-          <select value={entrance} onChange={(e) => setEntrance(e.target.value as EntrancePresetId)}>
-            {ENTRANCE_OPTIONS.map((o) => (
-              <option key={o.id} value={o.id}>{o.name}</option>
-            ))}
-          </select>
-        </label>
-
-        <label className="select-field">
-          Transition
-          <select value={transition} onChange={(e) => setTransition(e.target.value as TransitionPresetId)}>
-            {TRANSITION_OPTIONS.map((o) => (
-              <option key={o.id} value={o.id}>{o.name}</option>
-            ))}
-          </select>
-        </label>
+      <div className="template-picker">
+        {TEMPLATE_OPTIONS.map((t) => {
+          const active = t.id === 'auto' ? modeOverride === null : modeOverride === t.id
+          return (
+            <button
+              key={t.id}
+              type="button"
+              className={active ? 'template-option active' : 'template-option'}
+              onClick={() => setModeOverride(t.id === 'auto' ? null : t.id)}
+            >
+              {t.name}
+            </button>
+          )
+        })}
       </div>
 
-      <div className="actions">
-        <button className="primary" onClick={handleGeneratePreview} disabled={isGenerating}>
-          {isGenerating ? 'Preparing…' : 'Generate Preview'}
-        </button>
-      </div>
-
-      {doc && scene && (
+      {doc && scene ? (
         <>
-          <p className="hint">↓ In the preview below: click a word to toggle it, or drag to select a span and right-click to choose its effect.</p>
           <div className="preview-frame">
             <canvas
               ref={canvasRef}
@@ -471,10 +498,11 @@ function App() {
             />
             <canvas ref={overlayCanvasRef} width={doc.width} height={doc.height} className="selection-overlay" />
           </div>
+          <p className="hint">Click a word to toggle it, or drag + right-click to choose an effect for a phrase.</p>
 
           {doc.scenes.length > 1 && (
             <div className="scene-nav">
-              <button className="preset" onClick={() => setSceneIndex((i) => Math.max(0, i - 1))} disabled={sceneIndex === 0}>‹ Prev</button>
+              <button className="scene-arrow" onClick={() => setSceneIndex((i) => Math.max(0, i - 1))} disabled={sceneIndex === 0} aria-label="Previous scene">‹</button>
               <div className="scene-dots">
                 {doc.scenes.map((s, i) => (
                   <button
@@ -485,43 +513,63 @@ function App() {
                   />
                 ))}
               </div>
-              <button className="preset" onClick={() => setSceneIndex((i) => Math.min(doc.scenes.length - 1, i + 1))} disabled={sceneIndex === doc.scenes.length - 1}>Next ›</button>
+              <button className="scene-arrow" onClick={() => setSceneIndex((i) => Math.min(doc.scenes.length - 1, i + 1))} disabled={sceneIndex === doc.scenes.length - 1} aria-label="Next scene">›</button>
             </div>
           )}
 
-          {animatedRuns.length > 0 && (
-            <div className="chip-row">
-              {animatedRuns.map((r) => (
-                <button
-                  key={r.id}
-                  className={r.highlight!.animated ? 'chip chip-on' : 'chip'}
-                  onClick={() => handleChipToggle(r.id)}
-                  title={r.highlight!.kind}
-                >
-                  {r.text}
-                </button>
-              ))}
-            </div>
-          )}
-
-          <div className="actions export-actions">
-            <button className="primary" onClick={handleDownloadGif} disabled={isExporting}>
-              {isExporting ? 'Rendering…' : 'Download GIF'}
+          <div className="actions primary-actions">
+            <button className="cta-primary" onClick={handleCopyGif} disabled={busy}>
+              {isCopying ? 'Copying…' : 'Copy GIF'}
             </button>
-            {isExporting && (
-              <button className="preset" onClick={handleCancelExport}>Cancel</button>
+            <button className="cta-secondary" onClick={handleSaveGif} disabled={busy}>
+              {isExporting ? 'Saving…' : 'Save GIF'}
+            </button>
+            {busy && (
+              <button className="cta-text" onClick={handleCancelExport}>Cancel</button>
             )}
-            <div className="export-menu-wrap">
-              <button className="preset" onClick={() => setExportMenuOpen((v) => !v)}>Export ▾</button>
-              {exportMenuOpen && (
-                <div className="export-menu">
-                  <button onClick={handleExportPng}>PNG (current scene)</button>
-                  <button onClick={handleExportZip}>ZIP (all scenes, PNG)</button>
+          </div>
+
+          <div className="export-menu-wrap">
+            <button className="cta-text" onClick={() => setExportMenuOpen((v) => !v)}>More export options ▾</button>
+            {exportMenuOpen && (
+              <div className="export-menu">
+                <button onClick={handleExportPng}>PNG (current scene)</button>
+                <button onClick={handleExportZip}>ZIP (all scenes, PNG)</button>
+              </div>
+            )}
+          </div>
+
+          <details className="customize">
+            <summary>Customize</summary>
+            <div className="customize-body">
+              <label className="select-field">
+                Transition between scenes
+                <select value={transition} onChange={(e) => setTransition(e.target.value as TransitionPresetId)}>
+                  {TRANSITION_OPTIONS.map((o) => (
+                    <option key={o.id} value={o.id}>{o.name}</option>
+                  ))}
+                </select>
+              </label>
+
+              {animatedRuns.length > 0 && (
+                <div className="chip-row">
+                  {animatedRuns.map((r) => (
+                    <button
+                      key={r.id}
+                      className={r.highlight!.animated ? 'chip chip-on' : 'chip'}
+                      onClick={() => handleChipToggle(r.id)}
+                      title={r.highlight!.kind}
+                    >
+                      {r.text}
+                    </button>
+                  ))}
                 </div>
               )}
             </div>
-          </div>
+          </details>
         </>
+      ) : (
+        <p className="hint empty-state">{isGenerating ? 'Generating preview…' : 'Paste some text above to get started.'}</p>
       )}
 
       {status && <p className="status">{status}</p>}

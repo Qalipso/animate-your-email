@@ -35,8 +35,6 @@ const EMPHASIS_PRESETS: PresetDef[] = [
   { role: 'emphasis', id: 'weight-shift', name: 'Weight Shift' },
   { role: 'emphasis', id: 'burn', name: 'Burn' },
   { role: 'emphasis', id: 'wash-away', name: 'Wash Away' },
-  { role: 'emphasis', id: 'pixelate', name: 'Pixelate' },
-  { role: 'emphasis', id: 'assemble-blur', name: 'Assemble from Blur' },
   { role: 'emphasis', id: 'bow-highlight', name: 'Pink Highlight + Bow' },
   { role: 'emphasis', id: 'glitch', name: 'Glitch' },
 ]

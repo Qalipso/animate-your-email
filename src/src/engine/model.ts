@@ -13,6 +13,12 @@ export type HighlightKind =
   | 'cta'
   | 'content-word'
 
+// Every preset here animates only a decorative effect layer (highlight sweep, underline
+// draw, glow, shimmer, etc.) around or above the text — never the text's own visibility.
+// The base glyphs are always drawn at full opacity from the first frame (see
+// ALWAYS_VISIBLE in render.ts). Pixelate and Assemble-from-Blur were removed: both were
+// built entirely around starting illegible and resolving to readable, which is exactly
+// what this rule forbids.
 export type EmphasisPresetId =
   | 'marker-highlight'
   | 'underline-draw'
@@ -22,10 +28,12 @@ export type EmphasisPresetId =
   | 'weight-shift'
   | 'burn'
   | 'wash-away'
-  | 'pixelate'
-  | 'assemble-blur'
   | 'bow-highlight'
   | 'glitch'
+// Kept on Scene for document-model stability, but no longer affects rendering — the base
+// text layer is always fully visible from frame 1 regardless of this value (render.ts's
+// ALWAYS_VISIBLE). Not exposed as a UI choice anymore since every option would now look
+// identical.
 export type EntrancePresetId = 'fade' | 'soft-rise' | 'blur-reveal' | 'word-cascade'
 export type TransitionPresetId = 'crossfade' | 'slide-up'
 export type OutputMode = 'one-card' | 'paragraph' | 'story'

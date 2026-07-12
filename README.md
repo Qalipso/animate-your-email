@@ -2,20 +2,27 @@
 
 Turn typed text into a short animated layout — a single card, a paragraph, or a
 multi-scene story — exported as a GIF, PNG, or ZIP of PNGs, for pasting into emails
-(Gmail/Outlook). Three-step flow: **Paste → Generate → Download**.
+(Gmail/Outlook). Three-step flow: **Paste → choose template → Copy GIF**.
 
-## Status: V2
+## Status: V2 + simplification pass
 
-Paste up to 1500 characters. The text is auto-paginated into up to 6 scenes (One Card /
-Paragraph / Story, auto-selected or overridden), deterministic detection (no LLM) picks
-what's worth animating (capped at 15% of text / 5 phrases per scene), and any word can
-be clicked to toggle its animated state. Export as a multi-scene GIF (with entrance,
-emphasis, and transition animations), a single PNG, or a ZIP of one PNG per scene — all
-rendered through one shared Canvas2D/OffscreenCanvas pipeline so preview and export can
-never visually diverge.
+Paste up to 1500 characters — the preview auto-generates as you type (debounced, no manual
+step). The text is auto-paginated into up to 6 scenes (One Card / Paragraph / Story,
+auto-selected or overridden via a small template picker), deterministic detection (no LLM)
+picks what's worth animating (capped at 15% of text / 5 phrases per scene), and any word
+can be clicked to toggle its animated state. **The base readable text is always visible,
+from the first exported frame to the last — only the effect layer (highlight sweep,
+underline, glow, shimmer, etc.) around an emphasized phrase animates.**
+
+**Copy GIF** is the primary action (falls back to copying a static PNG with a clear message
+if the browser's clipboard doesn't support writing `image/gif` — verified unsupported in
+Chromium). **Save GIF** and PNG/ZIP export remain available as secondary actions. Advanced
+controls (scene transition, phrase toggles) live in a collapsed Customize panel.
 
 Full architecture and what's been verified vs. still open:
-[`knowledge/decisions/DEC-009-v2-long-form-architecture.md`](knowledge/decisions/DEC-009-v2-long-form-architecture.md).
+[`knowledge/decisions/DEC-009-v2-long-form-architecture.md`](knowledge/decisions/DEC-009-v2-long-form-architecture.md)
+and
+[`knowledge/decisions/DEC-010-simplify-ui-and-always-visible-text.md`](knowledge/decisions/DEC-010-simplify-ui-and-always-visible-text.md).
 
 ## Run the app
 

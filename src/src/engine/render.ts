@@ -46,19 +46,12 @@ interface WordEntranceState {
   blurPx: number
 }
 
-function entranceStateFor(entrance: EntrancePresetId, progress: number): WordEntranceState {
-  const eased = easeOutCubic(progress)
-  switch (entrance) {
-    case 'fade':
-      return { opacity: eased, translateY: 0, blurPx: 0 }
-    case 'soft-rise':
-      return { opacity: eased, translateY: (1 - eased) * 18, blurPx: 0 }
-    case 'blur-reveal':
-      return { opacity: eased, translateY: 0, blurPx: (1 - eased) * 10 }
-    case 'word-cascade':
-      return { opacity: eased, translateY: (1 - eased) * 10, blurPx: 0 }
-  }
-}
+// The base text layer is always fully visible, at its laid-out position, with no blur —
+// from the first exported frame to the last. Only emphasis effects (marker highlight,
+// glow, shimmer, etc.) animate; nothing ever hides, fades in, or blurs the readable text
+// itself. This replaced the old per-preset entrance reveal (fade/soft-rise/blur-reveal/
+// word-cascade), which by design made text illegible for part of the animation.
+const ALWAYS_VISIBLE: WordEntranceState = { opacity: 1, translateY: 0, blurPx: 0 }
 
 function drawWordBase(ctx: Ctx2D, word: LayoutWord, ox: number, oy: number, state: WordEntranceState, fontSize: number) {
   ctx.save()
@@ -81,14 +74,6 @@ function hashSeed(s: string): number {
     h = Math.imul(h, 16777619)
   }
   return (h >>> 0) / 4294967296
-}
-
-function makeScratchCanvas(width: number, height: number): OffscreenCanvas | HTMLCanvasElement {
-  if (typeof OffscreenCanvas !== 'undefined') return new OffscreenCanvas(width, height)
-  const c = document.createElement('canvas')
-  c.width = width
-  c.height = height
-  return c
 }
 
 function drawEmphasisWord(
@@ -163,8 +148,6 @@ function drawEmphasisWord(
 
   let scale = 1
   let scaleX = 1
-  let translateX = 0
-  let translateY = 0
   let fontWeight = ''
   let textColor = '#1a1a1a'
   let skipNormalFill = false
@@ -199,19 +182,6 @@ function drawEmphasisWord(
     const b = Math.round(26 + washMeltAmount * (175 - 26))
     textColor = `rgba(${r},${g},${b},${1 - washMeltAmount * 0.35})`
   }
-  if (preset === 'assemble-blur') {
-    // Converges from a per-word deterministic direction/distance to its exact laid-out
-    // position as `eased` -> 1, so the final frame always lands pixel-perfect. The flight
-    // is transient and can briefly cross a neighbor mid-flight — that read as a real
-    // "assembling" motion is the point; it's back in its own slot well before rest.
-    const dirAngle = seed * Math.PI * 2
-    const dist = (1 - eased) * fontSize * 0.9
-    translateX = Math.cos(dirAngle) * dist
-    translateY = Math.sin(dirAngle) * dist * 0.5
-    const blurPx = (1 - eased) * 8
-    ctx.filter = blurPx > 0.1 ? `blur(${blurPx}px)` : 'none'
-  }
-
   ctx.fillStyle = textColor
   ctx.font = `${fontWeight}${fontSize}px ${FONT_FAMILY}`
   ctx.textBaseline = 'alphabetic'
@@ -223,31 +193,6 @@ function drawEmphasisWord(
     const boldWidth = ctx.measureText(word.text).width
     if (boldWidth > word.width && boldWidth > 0) {
       scaleX = word.width / boldWidth
-    }
-  }
-
-  if (preset === 'pixelate') {
-    skipNormalFill = true
-    const blockSize = eased >= 0.97 ? 1 : Math.max(1, Math.round((1 - eased) * 8))
-    if (blockSize <= 1) {
-      ctx.fillText(word.text, x, yBaseline)
-    } else {
-      const w = Math.max(1, Math.ceil(word.width))
-      const h = Math.max(1, Math.ceil(fontSize * 1.3))
-      const scratch = makeScratchCanvas(w, h)
-      const sctx = scratch.getContext('2d') as Ctx2D
-      sctx.fillStyle = textColor
-      sctx.font = `${fontSize}px ${FONT_FAMILY}`
-      sctx.textBaseline = 'alphabetic'
-      sctx.fillText(word.text, 0, fontSize * 0.78)
-      const smallW = Math.max(1, Math.round(w / blockSize))
-      const smallH = Math.max(1, Math.round(h / blockSize))
-      const tiny = makeScratchCanvas(smallW, smallH)
-      const tctx = tiny.getContext('2d') as Ctx2D
-      tctx.drawImage(scratch as CanvasImageSource, 0, 0, w, h, 0, 0, smallW, smallH)
-      ctx.imageSmoothingEnabled = false
-      ctx.drawImage(tiny as CanvasImageSource, 0, 0, smallW, smallH, x, oy + word.y, w, h)
-      ctx.imageSmoothingEnabled = true
     }
   }
 
@@ -274,10 +219,10 @@ function drawEmphasisWord(
   }
 
   if (!skipNormalFill) {
-    if (scale !== 1 || scaleX !== 1 || translateX !== 0 || translateY !== 0) {
+    if (scale !== 1 || scaleX !== 1) {
       const cx = x + word.width / 2
       const cy = yBaseline - fontSize * 0.35
-      ctx.translate(cx + translateX, cy + translateY)
+      ctx.translate(cx, cy)
       ctx.scale(scale * scaleX, scale)
       ctx.translate(-cx, -cy)
     }
@@ -345,12 +290,19 @@ function drawEmphasisWord(
   ctx.restore()
 }
 
-/** Renders one scene at time tMs onto ctx at (offsetX, offsetY). Pure function — the only rendering codepath, used by both the live preview canvas and OffscreenCanvas export. */
+/**
+ * Renders one scene at time tMs onto ctx at (offsetX, offsetY). Pure function — the only
+ * rendering codepath, used by both the live preview canvas and OffscreenCanvas export.
+ *
+ * `_entrance` is kept in the signature (unused) rather than removed from every call site —
+ * Scene still carries an `entrance` field in the document model, but it no longer affects
+ * rendering: the base text layer is always fully visible (see ALWAYS_VISIBLE above).
+ */
 export function renderScene(
   ctx: Ctx2D,
   doc: AnimatedDocument,
   layout: TextLayout,
-  entrance: EntrancePresetId,
+  _entrance: EntrancePresetId,
   tMs: number,
   timing: SceneTiming,
   offsetX = 0,
@@ -363,23 +315,16 @@ export function renderScene(
   const ox = offsetX + PADDING
   const oy = offsetY + PADDING
   const words = layout.lines.flatMap((l) => l.words)
-  const wordCount = layout.totalWordCount
 
-  words.forEach((word, i) => {
-    const entranceProgress =
-      entrance === 'word-cascade'
-        ? clamp01((tMs - (i / Math.max(1, wordCount - 1)) * (timing.entranceMs * 0.6)) / (timing.entranceMs * 0.4))
-        : clamp01(tMs / timing.entranceMs)
-    const state = entranceStateFor(entrance, entranceProgress)
-
+  words.forEach((word) => {
     if (!word.highlight?.animated) {
-      drawWordBase(ctx, word, ox, oy, state, doc.fontSize)
+      drawWordBase(ctx, word, ox, oy, ALWAYS_VISIBLE, doc.fontSize)
       return
     }
 
     const phraseStart = timing.emphasisStartMs + word.animatedIndex * EMPHASIS_STAGGER_MS
     const emphasisProgress = clamp01((tMs - phraseStart) / EMPHASIS_DURATION_MS)
-    drawEmphasisWord(ctx, word, ox, oy, state, emphasisProgress, doc.fontSize)
+    drawEmphasisWord(ctx, word, ox, oy, ALWAYS_VISIBLE, emphasisProgress, doc.fontSize)
   })
 
   ctx.restore()
