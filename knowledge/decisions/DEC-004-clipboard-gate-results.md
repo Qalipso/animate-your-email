@@ -38,7 +38,7 @@ account).
 
 | Browser | Webmail | Strategy 1 | Strategy 2 | Strategy 3 |
 |---|---|---|---|---|
-| Chrome/macOS | Gmail Web | ✅ see below | ⚠️ inconclusive — clipboard contaminated mid-test | not run |
+| Chrome/macOS | Gmail Web | ✅ see below | ✅ see below (same result as Strategy 1) | not run |
 | Chrome/macOS | Outlook Web | not run | not run | not run |
 | Safari/macOS | Gmail Web | **not automatable** | **not automatable** | not run (manual) |
 | Safari/macOS | Outlook Web | **not automatable** | **not automatable** | not run (manual) |
@@ -72,19 +72,29 @@ account).
 chat — remote-CDN-by-default should NOT be the V1 architecture. See updated direction
 below.
 
-### Chrome/macOS × Gmail Web × Strategy 2 — inconclusive, clipboard contamination
-Attempted immediately after Strategy 1. The compose body ended up containing unrelated
-text (a bio/résumé line), not the test GIF paste — the OS clipboard was overwritten
-between the spike page's copy action and the paste, almost certainly by the user
+### Chrome/macOS × Gmail Web × Strategy 2 — RESULT: same as Strategy 1
+First attempt was inconclusive: the compose body ended up with unrelated pasted text (a
+bio/résumé line) because the OS clipboard was overwritten mid-test by the user
 interacting with the same real, shared browser/clipboard concurrently (confirmed
-separately — see the "hey hey" email earlier in this session, sent by the user testing
-manually in parallel). Draft discarded, not sent.
+separately — see the "hey hey" email sent by the user testing manually in parallel).
+Draft discarded, not sent. **Operational finding:** testing on a live, actively-used
+Chrome profile has a real clipboard race condition between the assistant and the user —
+mitigated by doing recipient/subject setup first, then copy-then-paste back-to-back with
+no intervening steps.
 
-**Operational finding, not a technical one:** testing on the user's live, actively-used
-Chrome profile has a real race condition — the assistant and the user can clobber each
-other's clipboard state between copy and paste. Strategy 2/3 and the Outlook leg need
-either tighter coordination (copy immediately followed by paste with no gap) or a
-dedicated moment where the user isn't concurrently using the clipboard.
+Retried with tight timing — succeeded. Raw MIME of the sent message:
+```
+<div dir="ltr"><img id="gmail-native-copy-gif" width="300" height="90"
+alt="CLIP TEST animated GIF"
+src="https://raw.githubusercontent.com/Qalipso/animate-your-email/main/spike/clipboard-gate/test-animation.gif"
+style="..."></div>
+```
+**Identical outcome to Strategy 1:** external URL preserved verbatim, no re-hosting.
+Native DOM/selection copy (`execCommand`) and the synthetic `ClipboardItem` write behave
+the same way in Gmail Web/Chrome — neither causes Gmail to fetch-and-embed the image.
+This resolves DEC-005's open question **for Gmail Web/Chrome specifically**: no copy
+strategy tested so far produces a self-contained (re-hosted) result. Both are equally
+subject to the tracking-pixel-shaped exposure described in DEC-005.
 
 ## Per-cell checklist (once run)
 inline placement vs. attachment · animation plays in composer · animation plays after
