@@ -36,6 +36,12 @@ const EMPHASIS_OPTIONS: { id: EmphasisPresetId; name: string }[] = [
   { id: 'gentle-pop', name: 'Gentle Pop' },
   { id: 'shimmer', name: 'Shimmer' },
   { id: 'weight-shift', name: 'Weight Shift' },
+  { id: 'burn', name: 'Burn' },
+  { id: 'wash-away', name: 'Wash Away' },
+  { id: 'pixelate', name: 'Pixelate' },
+  { id: 'assemble-blur', name: 'Assemble from Blur' },
+  { id: 'bow-highlight', name: 'Pink Highlight + Bow' },
+  { id: 'glitch', name: 'Glitch' },
 ]
 
 /** Finds the line/word nearest a point — forgiving hit test used while extending a drag selection. */
@@ -435,6 +441,7 @@ function App() {
 
       {doc && scene && (
         <>
+          <p className="hint">↓ In the preview below: click a word to toggle it, or drag to select a span and right-click to choose its effect.</p>
           <div className="preview-frame">
             <canvas
               ref={canvasRef}
@@ -448,7 +455,6 @@ function App() {
             />
             <canvas ref={overlayCanvasRef} width={doc.width} height={doc.height} className="selection-overlay" />
           </div>
-          <p className="hint">Click a word to toggle it. Drag to select a span, then right-click to choose its effect.</p>
 
           {doc.scenes.length > 1 && (
             <div className="scene-nav">
