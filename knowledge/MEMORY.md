@@ -16,6 +16,7 @@ frontmatter; this index links to them. Loaded into context automatically at sess
 - [DEC-001: GIF is the delivery format](decisions/DEC-001-gif-first-delivery.md) — CSS is preview-only; email clients don't render CSS animation reliably
 - [DEC-002: investigation findings](decisions/DEC-002-investigation-findings.md) — use `gifenc` (JS) not WASM; "Copy to email" clipboard mechanism is UNPROVEN, needs a spike as the first implementation task
 - [DEC-003: stack + roadmap](decisions/DEC-003-stack-and-roadmap.md) — V1 = React+Fabric.js+GSAP+gifenc+FastAPI+Supabase; Tiptap/PixiJS/CanvasKit explicitly deferred to V1.5/V2/V3, not V1
+- [DEC-004: clipboard gate results](decisions/DEC-004-clipboard-gate-results.md) — mechanical sanity check passed (Chrome/localhost, no throw); real Gmail/Outlook + Safari testing not yet run, in progress
 
 ## Links
 - Project map: [[animate-your-email]]
