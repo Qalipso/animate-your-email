@@ -1,0 +1,86 @@
+.app {
+  width: 100%;
+  max-width: 640px;
+  padding: 40px 20px;
+  box-sizing: border-box;
+  text-align: center;
+}
+
+.app h1 {
+  font-size: 28px;
+  font-weight: 600;
+  color: var(--text-h);
+  margin: 0 0 24px;
+}
+
+.text-input {
+  width: 100%;
+  box-sizing: border-box;
+  font-size: 18px;
+  padding: 12px 16px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg);
+  color: var(--text-h);
+  margin-bottom: 20px;
+}
+
+.preview-frame {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  display: inline-block;
+  overflow: hidden;
+  margin-bottom: 20px;
+}
+
+.preview-frame canvas {
+  display: block;
+}
+
+.preset-strip {
+  display: flex;
+  gap: 8px;
+  justify-content: center;
+  margin-bottom: 24px;
+}
+
+.preset {
+  font-size: 14px;
+  padding: 8px 16px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text);
+  cursor: pointer;
+}
+
+.preset.active {
+  border-color: var(--accent);
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.actions {
+  margin-bottom: 12px;
+}
+
+.primary {
+  font-size: 16px;
+  font-weight: 600;
+  padding: 12px 28px;
+  border: none;
+  border-radius: 8px;
+  background: var(--accent);
+  color: #fff;
+  cursor: pointer;
+}
+
+.primary:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.status {
+  font-size: 14px;
+  color: var(--text);
+}
