@@ -10,7 +10,11 @@
 | **Status** | scaffolded |
 
 ## Stack
-_TBD — fill in language/framework once decided (drives which brain skills/agents apply)._
+V1: React + Fabric.js (editable text-on-canvas) + GSAP/SplitText (animation) + `gifenc`
+(GIF encode, Web Worker) + FastAPI + Supabase Storage (asset hosting only, rendering
+stays client-side). Full rationale + V1.5/V2/V3 roadmap: `knowledge/decisions/DEC-003-stack-and-roadmap.md`.
 
 ## Scope
-_TBD — what's in, what's out._
+V1: one text block, ≤3 lines, block-level styling, 30 declarative presets, GIF export,
+Copy to email (mechanism unproven — see `knowledge/decisions/DEC-002-investigation-findings.md`).
+Details: `knowledge/memory/v1-scope.md`.
