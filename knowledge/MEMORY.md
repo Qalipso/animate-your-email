@@ -12,7 +12,8 @@ frontmatter; this index links to them. Loaded into context automatically at sess
 
 ## Facts
 <!-- - [Short title](memory/short-slug.md) — one-line hook -->
-_(none yet)_
+- [V1 product scope](memory/v1-scope.md) — single screen, 30 presets from 8 primitives, Copy to email + Download GIF
+- [DEC-001: GIF is the delivery format](decisions/DEC-001-gif-first-delivery.md) — CSS is preview-only; email clients don't render CSS animation reliably
 
 ## Links
 - Project map: [[animate-your-email]]
