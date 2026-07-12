@@ -14,6 +14,7 @@ frontmatter; this index links to them. Loaded into context automatically at sess
 <!-- - [Short title](memory/short-slug.md) — one-line hook -->
 - [V1 product scope](memory/v1-scope.md) — single screen, 30 presets from 8 primitives, Copy to email + Download GIF
 - [DEC-001: GIF is the delivery format](decisions/DEC-001-gif-first-delivery.md) — CSS is preview-only; email clients don't render CSS animation reliably
+- [DEC-002: investigation findings](decisions/DEC-002-investigation-findings.md) — use `gifenc` (JS) not WASM; "Copy to email" clipboard mechanism is UNPROVEN, needs a spike as the first implementation task
 
 ## Links
 - Project map: [[animate-your-email]]
