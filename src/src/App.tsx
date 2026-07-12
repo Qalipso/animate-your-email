@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { Canvas, FabricText, Rect, Shadow } from 'fabric'
 import gsap from 'gsap'
 import { DEFAULT_PRESET_IDS, PRESETS } from './engine/presets'
-import { sampleObject } from './engine/sample'
+import { sampleObject, totalEntranceMs } from './engine/sample'
 import { splitAndMeasure } from './engine/textSplit'
 import type { Category, Preset } from './engine/types'
 import { exportGif } from './gifExport'
@@ -149,6 +149,7 @@ function App() {
 
     const startTime = performance.now()
     const count = scene.objects.length
+    const entranceSpanMs = totalEntranceMs(preset)
 
     const tick = () => {
       const elapsed = performance.now() - startTime
@@ -166,14 +167,16 @@ function App() {
         })
       })
       if (scene.decoration) {
-        const progress = Math.min(1, Math.max(0, elapsed / preset.entranceMs))
+        const progress = Math.min(1, Math.max(0, elapsed / entranceSpanMs))
         const eased = preset.ease(progress)
         scene.decoration.set({ opacity: eased, scaleX: eased })
       }
       canvas.requestRenderAll()
 
-      // Stop re-rendering once the entrance has settled — nothing left to animate.
-      if (elapsed < preset.entranceMs + 200) {
+      // Stop re-rendering once the full staggered entrance has settled — nothing left
+      // to animate. Must wait for entranceSpanMs (entrance + stagger spread), not just
+      // entranceMs, or multi-segment presets freeze mid-animation.
+      if (elapsed < entranceSpanMs + 200) {
         canvas.requestRenderAll()
       } else {
         gsap.ticker.remove(tick)
@@ -199,7 +202,8 @@ function App() {
       const ctx = canvas.getElement().getContext('2d')
       if (!ctx) throw new Error('no 2d context on fabric canvas element')
 
-      const totalMs = preset.entranceMs + preset.holdMs
+      const entranceSpanMs = totalEntranceMs(preset)
+      const totalMs = entranceSpanMs + preset.holdMs
       const fps = 12
       const count = scene.objects.length
 
@@ -208,7 +212,9 @@ function App() {
           width: WIDTH,
           height: HEIGHT,
           renderFrame: (tSec) => {
-            const tMs = Math.min(tSec * 1000, preset.entranceMs)
+            // Clamp to the full staggered entrance span (not bare entranceMs), or
+            // later segments in multi-object presets never reach their final state.
+            const tMs = Math.min(tSec * 1000, entranceSpanMs)
             scene.objects.forEach((obj, i) => {
               const s = sampleObject(preset, i, count, tMs)
               obj.set({
@@ -224,7 +230,7 @@ function App() {
               })
             })
             if (scene.decoration) {
-              const progress = Math.min(1, Math.max(0, tMs / preset.entranceMs))
+              const progress = Math.min(1, Math.max(0, tMs / entranceSpanMs))
               const eased = preset.ease(progress)
               scene.decoration.set({ opacity: eased, scaleX: eased })
             }

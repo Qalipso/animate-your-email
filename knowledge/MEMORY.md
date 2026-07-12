@@ -20,6 +20,7 @@ frontmatter; this index links to them. Loaded into context automatically at sess
 - [DEC-005: privacy-first delivery pivot](decisions/DEC-005-privacy-first-delivery-pivot.md) — remote-hosted GIF behaves like a tracking pixel (confirmed by DEC-004); V1 defaults to local-only generation, "Copy animation" then "Download & insert" fallback, hosted image becomes opt-in with strict no-tracking constraints
 - [DEC-006: preset engine V1](decisions/DEC-006-preset-engine-v1.md) — 30 presets from one shared primitive engine (`src/src/engine/`); documents which named effects (blur, clip-masks, gradients, 3D flip, glitch) are honest approximations, not pixel-faithful, in V1
 - [DEC-007: retina canvas export bug](decisions/DEC-007-retina-canvas-export-bug.md) — Fabric.js scaled the canvas backing store by devicePixelRatio (2x), so GIF export's fixed 600x180 pixel read only captured a blank corner; fixed with `enableRetinaScaling: false`. Also added a font-size customize control
+- [DEC-008: stagger timing bug](decisions/DEC-008-stagger-timing-bug.md) — staggered presets (Typewriter, Wave, Bounce, Glitch, etc.) froze mid-animation because preview/export used one segment's own `entranceMs` instead of the full stagger spread as the stop condition; fixed with a `totalEntranceMs()` helper used consistently
 
 ## Links
 - Project map: [[animate-your-email]]

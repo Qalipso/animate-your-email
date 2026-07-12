@@ -51,6 +51,17 @@ export function staggerDelayMs(preset: Preset, index: number, count: number): nu
   }
 }
 
+/**
+ * The true wall-clock duration of the entrance, including stagger spread — the last
+ * split segment doesn't start its own entranceMs-long animation until staggerDelayMs
+ * has elapsed. Using bare `preset.entranceMs` anywhere the animation's total length
+ * matters (loop stop conditions, GIF export duration) cuts staggered presets off after
+ * only the first segment finishes, freezing mid-animation on multi-segment presets.
+ */
+export function totalEntranceMs(preset: Preset): number {
+  return (preset.delayMs ?? 0) + preset.entranceMs + (preset.stagger?.amountMs ?? 0)
+}
+
 /** Evaluates one split segment's full visual state at time tMs from animation start. Pure function — used identically by the live GSAP-driven preview and the deterministic GIF frame export, so what you preview is what you export. */
 export function sampleObject(preset: Preset, index: number, count: number, tMs: number): ObjectState {
   const delay = (preset.delayMs ?? 0) + staggerDelayMs(preset, index, count)
