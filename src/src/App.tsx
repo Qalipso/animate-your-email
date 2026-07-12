@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import {
   applyEmphasisToWordRange,
   buildAnimatedDocument,
@@ -138,6 +138,7 @@ function App() {
   // before the drag. The ref is always current; `selection` state exists only to drive
   // the overlay-redraw effect.
   const selectionRef = useRef<{ start: number; end: number } | null>(null)
+  const contextMenuRef = useRef<HTMLDivElement | null>(null)
 
   const effectiveMode = modeOverride ?? autoSelectMode(rawText)
   const scene = doc?.scenes[sceneIndex] ?? null
@@ -250,6 +251,21 @@ function App() {
       document.removeEventListener('mousedown', handlePointerDown)
       document.removeEventListener('keydown', handleKey)
     }
+  }, [contextMenu])
+
+  // Clamp the menu into the viewport — with 12 presets it's taller than the old 6-item
+  // version and can otherwise render partly (or entirely) below the fold with no way to
+  // reach the rest, since it's position:fixed and scrolling the page doesn't move it.
+  // useLayoutEffect so the reposition happens before paint, with no visible jump.
+  useLayoutEffect(() => {
+    const el = contextMenuRef.current
+    if (!el || !contextMenu) return
+    const margin = 8
+    const rect = el.getBoundingClientRect()
+    const maxLeft = Math.max(margin, window.innerWidth - rect.width - margin)
+    const maxTop = Math.max(margin, window.innerHeight - rect.height - margin)
+    el.style.left = `${Math.min(contextMenu.x, maxLeft)}px`
+    el.style.top = `${Math.min(contextMenu.y, maxTop)}px`
   }, [contextMenu])
 
   function localCoords(e: React.MouseEvent<HTMLCanvasElement>): { x: number; y: number } {
@@ -511,7 +527,7 @@ function App() {
       {status && <p className="status">{status}</p>}
 
       {contextMenu && (
-        <div className="context-menu" style={{ left: contextMenu.x, top: contextMenu.y }}>
+        <div ref={contextMenuRef} className="context-menu" style={{ left: contextMenu.x, top: contextMenu.y }}>
           {EMPHASIS_OPTIONS.map((o) => (
             <button key={o.id} onClick={() => handleChooseEmphasis(o.id)}>{o.name}</button>
           ))}

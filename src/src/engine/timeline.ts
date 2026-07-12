@@ -3,7 +3,7 @@ import { renderScene, computeSceneTiming, type SceneTiming } from './render'
 import type { Ctx2D } from './layout'
 import type { AnimatedDocument, Scene, TextLayout, TransitionPresetId } from './model'
 
-const TRANSITION_MS = 320
+const TRANSITION_MS = 650
 
 interface SceneSegment {
   kind: 'scene'

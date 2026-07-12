@@ -2,11 +2,14 @@ import { easeOutBack, easeOutCubic } from './easing'
 import { FONT_FAMILY, PADDING, type Ctx2D } from './layout'
 import type { AnimatedDocument, EntrancePresetId, LayoutWord, TextLayout } from './model'
 
-const ENTRANCE_BASE_MS = 550
-const WORD_CASCADE_STAGGER_MS = 35
-const WORD_CASCADE_MAX_MS = 1400
-const EMPHASIS_DURATION_MS = 550
-const EMPHASIS_STAGGER_MS = 180
+const ENTRANCE_BASE_MS = 1200
+const WORD_CASCADE_STAGGER_MS = 70
+const WORD_CASCADE_MAX_MS = 2800
+const EMPHASIS_DURATION_MS = 1200
+// Animated phrases play strictly one after another, never overlapping — each phrase's
+// start is the previous phrase's end, so "in order" isn't just visual (reading order via
+// animatedIndex) but also temporal.
+const EMPHASIS_STAGGER_MS = EMPHASIS_DURATION_MS
 const HOLD_AFTER_MS = 900
 
 export interface SceneTiming {
