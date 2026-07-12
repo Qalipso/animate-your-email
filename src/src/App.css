@@ -86,6 +86,31 @@
   gap: 8px;
 }
 
+.customize-toggle {
+  margin-bottom: 12px;
+}
+
+.customize-panel {
+  text-align: left;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 14px;
+  color: var(--text);
+}
+
+.field-value {
+  color: var(--text-h);
+  font-weight: 600;
+}
+
+.field input[type='range'] {
+  width: 100%;
+}
+
 .actions {
   margin-bottom: 12px;
 }

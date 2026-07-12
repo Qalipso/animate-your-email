@@ -11,7 +11,9 @@ import './App.css'
 const WIDTH = 600
 const HEIGHT = 180
 const BASE_TOP = HEIGHT / 2
-const FONT_SIZE = 40
+const MIN_FONT_SIZE = 22
+const MAX_FONT_SIZE = 64
+const DEFAULT_FONT_SIZE = 40
 const FONT_FAMILY = '-apple-system, sans-serif'
 const CATEGORIES: Category[] = ['Clean', 'Typing', 'Editorial', 'Playful', 'Bold', 'Light & Color']
 
@@ -22,8 +24,14 @@ interface Scene {
 }
 
 /** Builds the fabric objects for one text render (single block, or one per word/character). */
-function buildScene(canvas: Canvas, ctx: CanvasRenderingContext2D, text: string, preset: Preset): Scene {
-  ctx.font = `${FONT_SIZE}px ${FONT_FAMILY}`
+function buildScene(
+  canvas: Canvas,
+  ctx: CanvasRenderingContext2D,
+  text: string,
+  preset: Preset,
+  fontSize: number,
+): Scene {
+  ctx.font = `${fontSize}px ${FONT_FAMILY}`
   const { segments, totalWidth } = splitAndMeasure(ctx, text || ' ', preset.split)
   const startX = (WIDTH - totalWidth) / 2
 
@@ -33,7 +41,7 @@ function buildScene(canvas: Canvas, ctx: CanvasRenderingContext2D, text: string,
       top: BASE_TOP,
       originX: 'left',
       originY: 'center',
-      fontSize: FONT_SIZE,
+      fontSize,
       fontFamily: FONT_FAMILY,
       fill: '#1a1a1a',
       selectable: false,
@@ -47,7 +55,7 @@ function buildScene(canvas: Canvas, ctx: CanvasRenderingContext2D, text: string,
   if (preset.decoration === 'underline') {
     decoration = new Rect({
       left: startX,
-      top: BASE_TOP + FONT_SIZE / 2 + 6,
+      top: BASE_TOP + fontSize / 2 + 6,
       width: totalWidth,
       height: 4,
       fill: '#2b6cff',
@@ -62,7 +70,7 @@ function buildScene(canvas: Canvas, ctx: CanvasRenderingContext2D, text: string,
       left: startX - 6,
       top: BASE_TOP,
       width: totalWidth + 12,
-      height: FONT_SIZE + 10,
+      height: fontSize + 10,
       fill: '#ffe28a',
       originX: 'left',
       originY: 'center',
@@ -79,7 +87,9 @@ function buildScene(canvas: Canvas, ctx: CanvasRenderingContext2D, text: string,
 function App() {
   const [text, setText] = useState('Thank you for the meeting!')
   const [presetId, setPresetId] = useState<Preset['id']>('fade')
+  const [fontSize, setFontSize] = useState(DEFAULT_FONT_SIZE)
   const [drawerOpen, setDrawerOpen] = useState(false)
+  const [customizeOpen, setCustomizeOpen] = useState(false)
   const [status, setStatus] = useState('')
   const [isExporting, setIsExporting] = useState(false)
 
@@ -103,6 +113,12 @@ function App() {
       height: HEIGHT,
       backgroundColor: '#ffffff',
       selection: false,
+      // Fabric scales its backing canvas by devicePixelRatio by default (e.g. 1200x360
+      // on a retina display for a "600x180" canvas). GIF export reads raw pixels from
+      // this element at a fixed 600x180 window via getImageData, so a scaled backing
+      // store would silently crop the export to its top-left quarter. Keeping the
+      // backing store at exactly WIDTHxHEIGHT keeps preview and export pixel-identical.
+      enableRetinaScaling: false,
     })
     fabricCanvasRef.current = canvas
     return () => {
@@ -126,7 +142,7 @@ function App() {
 
     const ctx = canvas.getElement().getContext('2d')
     if (!ctx) return
-    const scene = buildScene(canvas, ctx, text, preset)
+    const scene = buildScene(canvas, ctx, text, preset, fontSize)
     sceneRef.current = scene
     baseXRef.current = scene.objects.map((o) => o.left ?? 0)
     baseYRef.current = BASE_TOP
@@ -169,7 +185,7 @@ function App() {
       gsap.ticker.remove(tick)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [text, presetId])
+  }, [text, presetId, fontSize])
 
   async function handleDownloadGif() {
     const canvas = fabricCanvasRef.current
@@ -284,6 +300,29 @@ function App() {
               </div>
             </div>
           ))}
+        </div>
+      )}
+
+      <div className="customize-toggle">
+        <button className="preset" onClick={() => setCustomizeOpen((v) => !v)}>
+          {customizeOpen ? 'Customize ▲' : 'Customize ▾'}
+        </button>
+      </div>
+
+      {customizeOpen && (
+        <div className="drawer customize-panel">
+          <label className="field">
+            <span>
+              Font size <span className="field-value">{fontSize}px</span>
+            </span>
+            <input
+              type="range"
+              min={MIN_FONT_SIZE}
+              max={MAX_FONT_SIZE}
+              value={fontSize}
+              onChange={(e) => setFontSize(Number(e.target.value))}
+            />
+          </label>
         </div>
       )}
 
