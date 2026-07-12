@@ -21,6 +21,7 @@ frontmatter; this index links to them. Loaded into context automatically at sess
 - [DEC-006: preset engine V1](decisions/DEC-006-preset-engine-v1.md) — 30 presets from one shared primitive engine (`src/src/engine/`); documents which named effects (blur, clip-masks, gradients, 3D flip, glitch) are honest approximations, not pixel-faithful, in V1
 - [DEC-007: retina canvas export bug](decisions/DEC-007-retina-canvas-export-bug.md) — Fabric.js scaled the canvas backing store by devicePixelRatio (2x), so GIF export's fixed 600x180 pixel read only captured a blank corner; fixed with `enableRetinaScaling: false`. Also added a font-size customize control
 - [DEC-008: stagger timing bug](decisions/DEC-008-stagger-timing-bug.md) — staggered presets (Typewriter, Wave, Bounce, Glitch, etc.) froze mid-animation because preview/export used one segment's own `entranceMs` instead of the full stagger spread as the stop condition; fixed with a `totalEntranceMs()` helper used consistently
+- [DEC-009: V2 long-form architecture](decisions/DEC-009-v2-long-form-architecture.md) — full rewrite: JSON document model (AnimatedDocument/Scene/TextBlock/TextRun/TextLayout) is now the source of truth, Fabric.js removed entirely, multi-scene pagination + deterministic highlight detection + click-to-toggle + Web Worker GIF export, 13 Vitest tests. Found/fixed 2 more real bugs (markup-delimiter leakage, click hit-test baseline-vs-top-edge mismatch). Known gap: no "style selector" UI, PNG export not interactively verified
 
 ## Links
 - Project map: [[animate-your-email]]

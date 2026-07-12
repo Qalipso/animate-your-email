@@ -1,4 +1,4 @@
-import type { Easing } from './types'
+export type Easing = (t: number) => number
 
 export const linear: Easing = (t) => t
 export const easeOutCubic: Easing = (t) => 1 - (1 - t) ** 3

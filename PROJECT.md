@@ -4,17 +4,25 @@
 |---|---|
 | **Slug** | `animate-your-email` |
 | **Created** | 2026-07-11 |
-| **Goal** | Turn typed text into a short animated GIF for pasting into emails (Gmail/Outlook) |
+| **Goal** | Turn text into a short animated layout — a single card, a paragraph, or a multi-scene story — for pasting into emails (Gmail/Outlook) |
 | **Brain** | `~/Documents/ClaudeBrain` (shared) |
 | **Knowledge (Obsidian)** | `ClaudeBrain/vault/Projects/animate-your-email` |
-| **Status** | V1 all 30 presets implemented, Download GIF working (`src/`); Copy animation not yet built (see DEC-005) |
+| **Status** | V2 implemented: JSON document model, deterministic highlight detection, multi-scene pagination, click-to-toggle, Web Worker GIF export, 13 Vitest tests passing. See `knowledge/decisions/DEC-009-v2-long-form-architecture.md` for what's verified vs known gaps. |
 
 ## Stack
-V1: React + Fabric.js (editable text-on-canvas) + GSAP/SplitText (animation) + `gifenc`
-(GIF encode, Web Worker) + FastAPI + Supabase Storage (asset hosting only, rendering
-stays client-side). Full rationale + V1.5/V2/V3 roadmap: `knowledge/decisions/DEC-003-stack-and-roadmap.md`.
+V2: React + plain Canvas2D/OffscreenCanvas (no Fabric.js — removed) + `gifenc` in a Web
+Worker for GIF encode. Rendering is driven entirely by a JSON document model
+(`src/src/engine/model.ts`); the model, not any canvas library, is the source of truth.
+Rationale: `knowledge/decisions/DEC-009-v2-long-form-architecture.md`. V1's stack pick
+(Fabric+GSAP) is superseded, see `knowledge/decisions/DEC-003-stack-and-roadmap.md` for
+history.
 
 ## Scope
-V1: one text block, ≤3 lines, block-level styling, 30 declarative presets, GIF export,
-Copy to email (mechanism unproven — see `knowledge/decisions/DEC-002-investigation-findings.md`).
-Details: `knowledge/memory/v1-scope.md`.
+Paste up to 1500 characters → auto-paginate into up to 6 scenes (One Card / Paragraph /
+Story, auto-selected or overridden) → deterministic highlight detection picks what to
+animate (capped at 15% of text / 5 phrases per scene) → click any word to toggle its
+animated state → Download GIF (multi-scene, with transitions) or export PNG/PNG
+sequence. Copy-to-email clipboard mechanism remains unproven/out of scope, see
+`knowledge/decisions/DEC-002-investigation-findings.md` and
+`knowledge/decisions/DEC-005-privacy-first-delivery-pivot.md`. No OAuth, AMP, cloud
+hosting, accounts, or sending — by design.
