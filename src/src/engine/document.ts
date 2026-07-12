@@ -3,6 +3,7 @@ import { clampFontSize, createMeasurer, metricsFor, wrapBlocksIntoLines, positio
 import { MODE_PRESETS } from './modeSelect'
 import type {
   AnimatedDocument,
+  EmphasisPresetId,
   EntrancePresetId,
   OutputMode,
   Scene,
@@ -166,6 +167,55 @@ export function toggleRunAnimation(doc: AnimatedDocument, runId: string): boolea
         }
       }
     }
+  }
+  return false
+}
+
+/** Finds the id of the block containing a given run, for use with applyEmphasisToWordRange. */
+export function findBlockIdForRun(doc: AnimatedDocument, runId: string): string | null {
+  for (const scene of doc.scenes) {
+    for (const block of scene.blocks) {
+      if (block.runs.some((r) => r.id === runId)) return block.id
+    }
+  }
+  return null
+}
+
+/**
+ * Merges a contiguous, in-order range of runs within one block into a single run carrying
+ * the chosen emphasis preset — this is how a user's right-click selection becomes "one
+ * animated phrase": LayoutWords sharing a runId share one animatedIndex/stagger group (see
+ * layout.ts's positionLines), so merging is what makes the whole selection animate together
+ * as a unit instead of each word animating independently.
+ *
+ * Bypasses the 15%/5-phrase automatic-detection caps deliberately — those exist to keep
+ * *automatic* highlight detection restrained, not to second-guess an explicit user choice.
+ */
+export function applyEmphasisToWordRange(
+  doc: AnimatedDocument,
+  blockId: string,
+  firstRunId: string,
+  lastRunId: string,
+  preset: EmphasisPresetId,
+): boolean {
+  for (const scene of doc.scenes) {
+    const block = scene.blocks.find((b) => b.id === blockId)
+    if (!block) continue
+    const startIdx = block.runs.findIndex((r) => r.id === firstRunId)
+    const endIdx = block.runs.findIndex((r) => r.id === lastRunId)
+    if (startIdx < 0 || endIdx < 0) continue
+    const lo = Math.min(startIdx, endIdx)
+    const hi = Math.max(startIdx, endIdx)
+    const covered = block.runs.slice(lo, hi + 1)
+    const text = covered.map((r) => r.text).join(' ')
+    const priority = Math.min(...covered.map((r) => r.highlight?.priority ?? 8))
+    const merged: TextRun = {
+      id: nextId('run'),
+      text,
+      highlight: { kind: 'content-word', priority, animated: true, emphasisPreset: preset },
+    }
+    block.runs.splice(lo, hi - lo + 1, merged)
+    return true
   }
   return false
 }

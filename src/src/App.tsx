@@ -1,10 +1,24 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { buildAnimatedDocument, layoutSceneForRender, toggleRunAnimation } from './engine/document'
+import {
+  applyEmphasisToWordRange,
+  buildAnimatedDocument,
+  findBlockIdForRun,
+  layoutSceneForRender,
+  toggleRunAnimation,
+} from './engine/document'
 import { cancelExport, exportDocumentAsGif, exportScenesAsZip, exportSceneAsPng, ExportCancelledError } from './engine/exportV2'
 import { autoSelectMode } from './engine/modeSelect'
 import { computeSceneTiming, renderScene } from './engine/render'
 import { PADDING } from './engine/layout'
-import type { AnimatedDocument, EntrancePresetId, OutputMode, TextLayout, TransitionPresetId } from './engine/model'
+import type {
+  AnimatedDocument,
+  EmphasisPresetId,
+  EntrancePresetId,
+  LayoutWord,
+  OutputMode,
+  TextLayout,
+  TransitionPresetId,
+} from './engine/model'
 import { MAX_CHARACTERS } from './engine/model'
 import './App.css'
 
@@ -14,6 +28,59 @@ const ENTRANCE_OPTIONS: { id: EntrancePresetId; name: string }[] = [
   { id: 'blur-reveal', name: 'Blur Reveal' },
   { id: 'word-cascade', name: 'Word Cascade' },
 ]
+
+const EMPHASIS_OPTIONS: { id: EmphasisPresetId; name: string }[] = [
+  { id: 'marker-highlight', name: 'Marker Highlight' },
+  { id: 'underline-draw', name: 'Underline Draw' },
+  { id: 'soft-glow', name: 'Soft Glow' },
+  { id: 'gentle-pop', name: 'Gentle Pop' },
+  { id: 'shimmer', name: 'Shimmer' },
+  { id: 'weight-shift', name: 'Weight Shift' },
+]
+
+/** Finds the line/word nearest a point — forgiving hit test used while extending a drag selection. */
+function hitTestNearestWord(layout: TextLayout, x: number, y: number): number | null {
+  if (layout.lines.length === 0) return null
+  let bestLine = layout.lines[0]
+  let bestLineDist = Infinity
+  for (const line of layout.lines) {
+    const dist = Math.abs(line.y + line.height / 2 - y)
+    if (dist < bestLineDist) {
+      bestLineDist = dist
+      bestLine = line
+    }
+  }
+  if (bestLine.words.length === 0) return null
+  let bestWord: LayoutWord = bestLine.words[0]
+  let bestWordDist = Infinity
+  for (const w of bestLine.words) {
+    const dist = Math.abs(w.x + w.width / 2 - x)
+    if (dist < bestWordDist) {
+      bestWordDist = dist
+      bestWord = w
+    }
+  }
+  let flatIdx = 0
+  for (const line of layout.lines) {
+    for (const w of line.words) {
+      if (w === bestWord) return flatIdx
+      flatIdx++
+    }
+  }
+  return null
+}
+
+/** Exact box hit test — used for a plain click/right-click so clicking blank space does nothing. */
+function hitTestWordStrict(layout: TextLayout, x: number, y: number): number | null {
+  let flatIdx = 0
+  for (const line of layout.lines) {
+    for (const w of line.words) {
+      if (x >= w.x && x <= w.x + w.width && y >= w.y && y <= w.y + w.height) return flatIdx
+      flatIdx++
+    }
+  }
+  return null
+}
 
 const TRANSITION_OPTIONS: { id: TransitionPresetId; name: string }[] = [
   { id: 'crossfade', name: 'Crossfade' },
@@ -45,9 +112,26 @@ function App() {
   const [isExporting, setIsExporting] = useState(false)
   const [exportMenuOpen, setExportMenuOpen] = useState(false)
   const [layout, setLayout] = useState<TextLayout | null>(null)
+  const [selection, setSelection] = useState<{ start: number; end: number } | null>(null)
+  const [contextMenu, setContextMenu] = useState<{
+    x: number
+    y: number
+    blockId: string
+    firstRunId: string
+    lastRunId: string
+  } | null>(null)
 
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
+  const overlayCanvasRef = useRef<HTMLCanvasElement | null>(null)
   const rafRef = useRef<number | null>(null)
+  const draggingRef = useRef(false)
+  const anchorIndexRef = useRef<number | null>(null)
+  // Mirrors `selection` state for use inside handlers that fire in quick succession
+  // (mousedown -> mousemove -> mouseup -> contextmenu): React state updates are batched,
+  // so a handler later in the same gesture can otherwise read a stale `selection` from
+  // before the drag. The ref is always current; `selection` state exists only to drive
+  // the overlay-redraw effect.
+  const selectionRef = useRef<{ start: number; end: number } | null>(null)
 
   const effectiveMode = modeOverride ?? autoSelectMode(rawText)
   const scene = doc?.scenes[sceneIndex] ?? null
@@ -56,6 +140,10 @@ function App() {
   // (`version`) changes. Async because layoutSceneForRender awaits font readiness.
   useEffect(() => {
     let cancelled = false
+    // Word indices in `selection`/`contextMenu` are only valid for the layout they were
+    // computed against — scene navigation invalidates them just as much as a text edit.
+    updateSelection(null)
+    setContextMenu(null)
     if (!doc || !scene) {
       setLayout(null)
       return
@@ -113,22 +201,135 @@ function App() {
     }
   }, [doc, scene, layout])
 
-  function handleCanvasClick(e: React.MouseEvent<HTMLCanvasElement>) {
-    if (!doc || !scene || !layout) return
-    const rect = canvasRef.current!.getBoundingClientRect()
-    const x = e.clientX - rect.left - PADDING
-    const y = e.clientY - rect.top - PADDING
-    // word.y/word.height describe the word's line box (top-relative), not a text
-    // baseline, so hit-testing is a plain box test against [y, y+height].
-    for (const line of layout.lines) {
-      for (const word of line.words) {
-        if (x >= word.x && x <= word.x + word.width && y >= word.y && y <= word.y + word.height) {
-          toggleRunAnimation(doc, word.runId)
-          setVersion((v) => v + 1)
-          return
-        }
+  // Selection highlight overlay — a separate, non-interactive canvas drawn only for the
+  // live editor. Kept entirely out of renderScene()/renderTimelineFrame() so selection UI
+  // can never leak into the shared preview/export rendering codepath (see DEC-009).
+  useEffect(() => {
+    const canvas = overlayCanvasRef.current
+    if (!canvas || !doc) return
+    const ctx = canvas.getContext('2d')
+    if (!ctx) return
+    ctx.clearRect(0, 0, canvas.width, canvas.height)
+    if (!selection || !layout) return
+    const flat = layout.lines.flatMap((l) => l.words)
+    const lo = Math.min(selection.start, selection.end)
+    const hi = Math.max(selection.start, selection.end)
+    if (lo === hi) return
+    ctx.fillStyle = 'rgba(43, 108, 255, 0.25)'
+    for (let i = lo; i <= hi; i++) {
+      const w = flat[i]
+      if (!w) continue
+      ctx.fillRect(PADDING + w.x - 2, PADDING + w.y, w.width + 4, w.height)
+    }
+  }, [selection, layout, doc])
+
+  // Dismiss the context menu on an outside click or Escape.
+  useEffect(() => {
+    if (!contextMenu) return
+    function handlePointerDown(e: MouseEvent) {
+      if (!(e.target as HTMLElement).closest('.context-menu')) {
+        setContextMenu(null)
+        updateSelection(null)
       }
     }
+    function handleKey(e: KeyboardEvent) {
+      if (e.key === 'Escape') {
+        setContextMenu(null)
+        updateSelection(null)
+      }
+    }
+    document.addEventListener('mousedown', handlePointerDown)
+    document.addEventListener('keydown', handleKey)
+    return () => {
+      document.removeEventListener('mousedown', handlePointerDown)
+      document.removeEventListener('keydown', handleKey)
+    }
+  }, [contextMenu])
+
+  function localCoords(e: React.MouseEvent<HTMLCanvasElement>): { x: number; y: number } {
+    const rect = canvasRef.current!.getBoundingClientRect()
+    return { x: e.clientX - rect.left - PADDING, y: e.clientY - rect.top - PADDING }
+  }
+
+  function updateSelection(next: { start: number; end: number } | null) {
+    selectionRef.current = next
+    setSelection(next)
+  }
+
+  function handleMouseDown(e: React.MouseEvent<HTMLCanvasElement>) {
+    if (!layout || e.button !== 0) return
+    const { x, y } = localCoords(e)
+    const idx = hitTestWordStrict(layout, x, y)
+    if (idx === null) return
+    draggingRef.current = true
+    anchorIndexRef.current = idx
+    updateSelection({ start: idx, end: idx })
+    setContextMenu(null)
+  }
+
+  function handleMouseMove(e: React.MouseEvent<HTMLCanvasElement>) {
+    if (!draggingRef.current || !layout || anchorIndexRef.current === null) return
+    const { x, y } = localCoords(e)
+    const idx = hitTestNearestWord(layout, x, y)
+    if (idx === null) return
+    updateSelection({ start: anchorIndexRef.current, end: idx })
+  }
+
+  function handleMouseUp() {
+    if (!draggingRef.current) return
+    draggingRef.current = false
+    const current = selectionRef.current
+    // A plain click (no real drag across words) keeps the old single-word toggle behavior.
+    if (current && current.start === current.end && doc && layout) {
+      const flat = layout.lines.flatMap((l) => l.words)
+      const word = flat[current.start]
+      if (word) {
+        toggleRunAnimation(doc, word.runId)
+        setVersion((v) => v + 1)
+      }
+      updateSelection(null)
+    }
+  }
+
+  function handleContextMenu(e: React.MouseEvent<HTMLCanvasElement>) {
+    e.preventDefault()
+    if (!doc || !layout) return
+    const flat = layout.lines.flatMap((l) => l.words)
+    const current = selectionRef.current
+    let lo: number
+    let hi: number
+    if (current && current.start !== current.end) {
+      lo = Math.min(current.start, current.end)
+      hi = Math.max(current.start, current.end)
+    } else {
+      const { x, y } = localCoords(e)
+      const idx = hitTestWordStrict(layout, x, y)
+      if (idx === null) return
+      lo = idx
+      hi = idx
+    }
+    const firstWord = flat[lo]
+    if (!firstWord) return
+    const blockId = findBlockIdForRun(doc, firstWord.runId)
+    if (!blockId) return
+    // Clamp to the anchor word's block — no cross-paragraph merges.
+    let lastWord = firstWord
+    for (let i = hi; i >= lo; i--) {
+      const w = flat[i]
+      if (w && findBlockIdForRun(doc, w.runId) === blockId) {
+        lastWord = w
+        break
+      }
+    }
+    setContextMenu({ x: e.clientX, y: e.clientY, blockId, firstRunId: firstWord.runId, lastRunId: lastWord.runId })
+  }
+
+  function handleChooseEmphasis(preset: EmphasisPresetId) {
+    if (!doc || !contextMenu) return
+    applyEmphasisToWordRange(doc, contextMenu.blockId, contextMenu.firstRunId, contextMenu.lastRunId, preset)
+    setVersion((v) => v + 1)
+    setContextMenu(null)
+    updateSelection(null)
   }
 
   function handleChipToggle(runId: string) {
@@ -239,10 +440,15 @@ function App() {
               ref={canvasRef}
               width={doc.width}
               height={doc.height}
-              onClick={handleCanvasClick}
+              onMouseDown={handleMouseDown}
+              onMouseMove={handleMouseMove}
+              onMouseUp={handleMouseUp}
+              onContextMenu={handleContextMenu}
               style={{ cursor: 'pointer' }}
             />
+            <canvas ref={overlayCanvasRef} width={doc.width} height={doc.height} className="selection-overlay" />
           </div>
+          <p className="hint">Click a word to toggle it. Drag to select a span, then right-click to choose its effect.</p>
 
           {doc.scenes.length > 1 && (
             <div className="scene-nav">
@@ -297,6 +503,14 @@ function App() {
       )}
 
       {status && <p className="status">{status}</p>}
+
+      {contextMenu && (
+        <div className="context-menu" style={{ left: contextMenu.x, top: contextMenu.y }}>
+          {EMPHASIS_OPTIONS.map((o) => (
+            <button key={o.id} onClick={() => handleChooseEmphasis(o.id)}>{o.name}</button>
+          ))}
+        </div>
+      )}
     </div>
   )
 }
