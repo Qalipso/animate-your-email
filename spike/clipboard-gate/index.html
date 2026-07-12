@@ -1,0 +1,152 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>animate-your-email — clipboard gate spike</title>
+<style>
+  body { font-family: -apple-system, sans-serif; max-width: 720px; margin: 40px auto; padding: 0 16px; }
+  h1 { font-size: 20px; }
+  .gif-src { border: 1px solid #ccc; padding: 8px; display: inline-block; margin: 8px 0; }
+  .row { border: 1px solid #ddd; border-radius: 8px; padding: 16px; margin: 16px 0; }
+  button { font-size: 15px; padding: 8px 14px; cursor: pointer; }
+  pre { background: #f5f5f5; padding: 8px; border-radius: 4px; white-space: pre-wrap; word-break: break-all; }
+  .status { font-weight: 600; }
+  .ok { color: #1a7f37; }
+  .err { color: #cf222e; }
+  #selectable-copy-source { display: inline-block; }
+</style>
+</head>
+<body>
+
+<h1>Clipboard gate spike — animate-your-email</h1>
+<p>
+  Source GIF (persistent, public):<br>
+  <code id="gif-url"></code>
+</p>
+<div class="gif-src">
+  <img id="source-gif" width="300" height="90" alt="CLIP TEST animated GIF">
+</div>
+
+<p><strong>Test procedure:</strong> click a strategy's button (or manually copy for
+Strategy 3), then paste into a real Gmail/Outlook compose window. Record the result in
+the test matrix in <code>DEC-002</code>. Do not judge success from this page — only from
+what actually appears in the composer / sent / received email.</p>
+
+<div class="row">
+  <h2>Strategy 1 — navigator.clipboard.write() (text/html + text/plain)</h2>
+  <p>The mechanism DEC-001 actually proposes to ship. Writes an HTML fragment containing
+  an <code>&lt;img&gt;</code> pointing at the public GIF URL, plus a plain-text
+  fallback.</p>
+  <button id="btn-strategy-1">Copy via clipboard.write()</button>
+  <div id="status-1" class="status"></div>
+</div>
+
+<div class="row">
+  <h2>Strategy 2 — native DOM/selection copy (execCommand)</h2>
+  <p>Selects the real rendered <code>&lt;img&gt;</code> element on this page via a Range
+  and triggers the browser's native copy command, instead of constructing the clipboard
+  payload by hand.</p>
+  <div id="selectable-copy-source">
+    <img id="native-copy-gif" width="300" height="90" alt="CLIP TEST animated GIF">
+  </div>
+  <br>
+  <button id="btn-strategy-2">Select image + copy (execCommand)</button>
+  <div id="status-2" class="status"></div>
+</div>
+
+<div class="row">
+  <h2>Strategy 3 — manual selection + Cmd/Ctrl+C (control case)</h2>
+  <p>No JavaScript. Manually select the image below (click-drag to select it, or
+  right-click → Copy Image) and press Cmd/Ctrl+C yourself. This establishes the ceiling:
+  if even a human copy/paste doesn't survive the full path, no JS-driven mechanism will
+  either.</p>
+  <img id="manual-copy-gif" width="300" height="90" alt="CLIP TEST animated GIF">
+</div>
+
+<hr>
+<h2>Read back what's actually on the clipboard (sanity check only)</h2>
+<p>This does <em>not</em> tell you whether Gmail/Outlook will render it correctly — only
+that the write succeeded and what MIME types are present. Some browsers block
+programmatic clipboard reads outside a user gesture; click right after copying.</p>
+<button id="btn-read-clipboard">Read clipboard now</button>
+<pre id="read-result">(not read yet)</pre>
+
+<script>
+const GIF_URL = "https://raw.githubusercontent.com/Qalipso/animate-your-email/main/spike/clipboard-gate/test-animation.gif";
+document.getElementById('gif-url').textContent = GIF_URL;
+document.getElementById('source-gif').src = GIF_URL;
+document.getElementById('native-copy-gif').src = GIF_URL;
+document.getElementById('manual-copy-gif').src = GIF_URL;
+
+function setStatus(id, ok, msg) {
+  const el = document.getElementById(id);
+  el.textContent = msg;
+  el.className = 'status ' + (ok ? 'ok' : 'err');
+}
+
+// Strategy 1: navigator.clipboard.write() with text/html + text/plain.
+// Deliberately NOT using blob URLs, base64, or image/gif ClipboardItem data —
+// the html fragment references the public GIF URL directly, matching the
+// actual shipping mechanism from DEC-001.
+document.getElementById('btn-strategy-1').addEventListener('click', async () => {
+  const altText = 'CLIP TEST animated GIF';
+  const html = `<img src="${GIF_URL}" width="600" alt="${altText}" style="display:block;max-width:100%;height:auto;border:0;">`;
+  const plain = GIF_URL;
+  try {
+    const item = new ClipboardItem({
+      'text/html': new Blob([html], { type: 'text/html' }),
+      'text/plain': new Blob([plain], { type: 'text/plain' }),
+    });
+    await navigator.clipboard.write([item]);
+    setStatus('status-1', true, 'OK — wrote text/html + text/plain to clipboard. Now paste into Gmail/Outlook.');
+  } catch (err) {
+    setStatus('status-1', false, 'FAILED: ' + err.message);
+  }
+});
+
+// Strategy 2: native DOM/selection copy via execCommand, off a real Range
+// selecting the rendered <img> element (not a manually-constructed payload).
+document.getElementById('btn-strategy-2').addEventListener('click', () => {
+  try {
+    const img = document.getElementById('native-copy-gif');
+    const range = document.createRange();
+    range.selectNode(img);
+    const selection = window.getSelection();
+    selection.removeAllRanges();
+    selection.addRange(range);
+    const ok = document.execCommand('copy');
+    selection.removeAllRanges();
+    if (ok) {
+      setStatus('status-2', true, 'OK — execCommand(copy) returned true. Now paste into Gmail/Outlook.');
+    } else {
+      setStatus('status-2', false, 'execCommand(copy) returned false (unsupported/blocked in this browser).');
+    }
+  } catch (err) {
+    setStatus('status-2', false, 'FAILED: ' + err.message);
+  }
+});
+
+// Sanity check: read back what's actually on the clipboard right now.
+document.getElementById('btn-read-clipboard').addEventListener('click', async () => {
+  const out = document.getElementById('read-result');
+  try {
+    const items = await navigator.clipboard.read();
+    let lines = [];
+    for (const item of items) {
+      lines.push('types: ' + item.types.join(', '));
+      for (const type of item.types) {
+        if (type === 'text/plain' || type === 'text/html') {
+          const blob = await item.getType(type);
+          const text = await blob.text();
+          lines.push(`  [${type}] ${text.slice(0, 300)}`);
+        }
+      }
+    }
+    out.textContent = lines.join('\n') || '(clipboard empty or unreadable)';
+  } catch (err) {
+    out.textContent = 'READ FAILED: ' + err.message;
+  }
+});
+</script>
+</body>
+</html>
