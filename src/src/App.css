@@ -454,11 +454,15 @@
   overflow: hidden;
 }
 
+/* Driven by transform, not width: the worker reports progress ~50 times per export, and
+   animating width would relayout the panel on every one of them. */
 .progress-bar {
+  width: 100%;
   height: 100%;
   background: var(--accent);
   border-radius: 999px;
-  transition: width 0.12s linear;
+  transform-origin: left center;
+  transition: transform 0.12s linear;
 }
 
 .export-menu-wrap {

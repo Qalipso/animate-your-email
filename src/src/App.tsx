@@ -693,7 +693,7 @@ function App() {
 
               {busy && (
                 <div className="progress" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round((exportProgress ?? 0) * 100)}>
-                  <div className="progress-bar" style={{ width: `${Math.round((exportProgress ?? 0) * 100)}%` }} />
+                  <div className="progress-bar" style={{ transform: `scaleX(${exportProgress ?? 0})` }} />
                 </div>
               )}
 
