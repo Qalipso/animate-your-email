@@ -50,6 +50,7 @@ interface FlatWord {
   highlight?: HighlightSpec
   isFirstOfParagraph: boolean
   blockIndex: number
+  tightBefore: boolean
 }
 
 /** Splits a word wider than maxWidth into multiple chunks that each fit (long URLs, long tokens). */
@@ -75,12 +76,30 @@ function flattenBlockToWords(block: TextBlock, blockIndex: number): FlatWord[] {
   const words: FlatWord[] = []
   block.runs.forEach((run) => {
     const parts = run.text.split(/\s+/).filter(Boolean)
-    parts.forEach((part) => {
-      words.push({ runId: run.id, text: part, highlight: run.highlight, isFirstOfParagraph: false, blockIndex })
+    parts.forEach((part, partIndex) => {
+      words.push({
+        runId: run.id,
+        text: part,
+        highlight: run.highlight,
+        isFirstOfParagraph: false,
+        blockIndex,
+        // Only a run's first token can inherit the run's tightness — the rest were split
+        // on whitespace that really is in the source.
+        tightBefore: partIndex === 0 && run.tightBefore === true,
+      })
     })
   })
-  if (words.length > 0) words[0].isFirstOfParagraph = true
+  if (words.length > 0) {
+    words[0].isFirstOfParagraph = true
+    // A paragraph never starts tight against the previous paragraph.
+    words[0].tightBefore = false
+  }
   return words
+}
+
+/** Advance between the previous word on a line and this one: zero for punctuation that was glued to it in the source. */
+function advanceBefore(word: { tightBefore?: boolean }, spaceWidth: number): number {
+  return word.tightBefore ? 0 : spaceWidth
 }
 
 export interface WrappedLine {
@@ -122,25 +141,33 @@ export function wrapBlocksIntoLines(
 
       const text = w.text
       const width = ctx.measureText(text).width
+      const advance = advanceBefore(w, spaceWidth)
       if (width > metrics.contentWidth) {
-        // Long word/URL: hard-split into fitting chunks, each its own layout word.
+        // Long word/URL: hard-split into fitting chunks, each its own layout word. Chunks
+        // after the first continue mid-word, so they are always tight against their
+        // predecessor when they land on the same line.
         const chunks = splitOversizedWord(ctx, text, metrics.contentWidth)
-        chunks.forEach((chunk) => {
+        chunks.forEach((chunk, chunkIndex) => {
           const chunkWidth = ctx.measureText(chunk).width
-          const needed = current.length === 0 ? chunkWidth : currentWidth + spaceWidth + chunkWidth
+          const chunkAdvance = chunkIndex === 0 ? advance : 0
+          const needed = current.length === 0 ? chunkWidth : currentWidth + chunkAdvance + chunkWidth
           if (needed > metrics.contentWidth && current.length > 0) flush()
           if (current.length === 0) currentBlockIndex = w.blockIndex
-          current.push({ runId: w.runId, text: chunk, x: 0, y: 0, width: chunkWidth, height: metrics.lineHeight, highlight: w.highlight, animatedIndex: -1 })
-          currentWidth = current.length === 1 ? chunkWidth : currentWidth + spaceWidth + chunkWidth
+          const tight = current.length > 0 && chunkAdvance === 0
+          current.push({ runId: w.runId, text: chunk, x: 0, y: 0, width: chunkWidth, height: metrics.lineHeight, highlight: w.highlight, animatedIndex: -1, tightBefore: tight })
+          currentWidth = current.length === 1 ? chunkWidth : currentWidth + chunkAdvance + chunkWidth
         })
         return
       }
 
-      const needed = current.length === 0 ? width : currentWidth + spaceWidth + width
+      const needed = current.length === 0 ? width : currentWidth + advance + width
       if (needed > metrics.contentWidth && current.length > 0) flush()
       if (current.length === 0) currentBlockIndex = w.blockIndex
-      current.push({ runId: w.runId, text, x: 0, y: 0, width, height: metrics.lineHeight, highlight: w.highlight, animatedIndex: -1 })
-      currentWidth = current.length === 1 ? width : currentWidth + spaceWidth + width
+      // A word that wrapped to a new line starts that line, so its source-level tightness
+      // no longer applies — nothing precedes it to be tight against.
+      const tight = current.length > 0 && advance === 0
+      current.push({ runId: w.runId, text, x: 0, y: 0, width, height: metrics.lineHeight, highlight: w.highlight, animatedIndex: -1, tightBefore: tight })
+      currentWidth = current.length === 1 ? width : currentWidth + advance + width
     })
   })
   flush()
@@ -160,10 +187,11 @@ export function positionLines(ctx: Ctx2D, lines: WrappedLine[], metrics: LayoutM
   lines.forEach((line, i) => {
     if (i > 0 && line.isFirstOfParagraph) y += metrics.paragraphGap
     let x = 0
-    line.words.forEach((w) => {
+    line.words.forEach((w, wi) => {
+      if (wi > 0) x += advanceBefore(w, spaceWidth)
       w.x = x
       w.y = y
-      x += w.width + spaceWidth
+      x += w.width
       totalWords += 1
       if (w.highlight?.animated) {
         if (!animatedIndexByRunId.has(w.runId)) animatedIndexByRunId.set(w.runId, animatedCounter++)

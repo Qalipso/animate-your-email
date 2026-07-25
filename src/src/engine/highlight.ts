@@ -42,7 +42,10 @@ function escapeRegExp(s: string): string {
 
 const MARKUP_SOFT_RE = /\*([^*\n]{1,120})\*/g
 const MARKUP_PRIMARY_RE = /\[\[([^\]\n]{1,120})\]\]/g
-const QUOTE_RE = /["“]([^"”\n]{2,120})["”]/g
+// The capture group deliberately spans the quotation marks too: unlike `*soft*` and
+// `[[primary]]`, which are authoring markup the user expects to disappear, real quotation
+// marks are part of the sentence. Stripping them silently rewrote the user's text.
+const QUOTE_RE = /(["“][^"”\n]{2,120}["”])/g
 const NUMBER_DATE_RE =
   /\$\d[\d,]*(?:\.\d+)?|\d[\d,]*(?:\.\d+)?%|\b(?:January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{1,2}(?:,\s*\d{4})?\b|\b\d{1,2}\s+(?:January|February|March|April|May|June|July|August|September|October|November|December)(?:,?\s*\d{4})?\b|\b\d{1,2}\/\d{1,2}(?:\/\d{2,4})?\b|\b\d{4}\b|\b\d[\d,]*(?:\.\d+)?\b/g
 // \p{Lu}\p{Ll} (uppercase letter + lowercase letters) works for any script's cased
@@ -111,20 +114,30 @@ function nextRunId(): string {
   return `run-${runCounter}`
 }
 
-/** Splits a plain-text gap into individually clickable per-word runs, marking newlines as paragraph breaks. */
-function wordRuns(text: string): TextRun[] {
+/**
+ * Splits a plain-text gap into individually clickable per-word runs, marking newlines as
+ * paragraph breaks. `gapStart` is the gap's offset in the full source text: only the gap's
+ * very first token can be tight against whatever preceded it (everything after it is
+ * separated by the whitespace this function splits on), and it is tight exactly when the
+ * gap does not itself begin with whitespace.
+ */
+function wordRuns(text: string, gapStart: number): TextRun[] {
   const runs: TextRun[] = []
+  let isFirstToken = true
   for (const token of text.split(/(\s+)/)) {
     if (token.length === 0) continue
     if (/^\s+$/.test(token)) {
       if (token.includes('\n')) runs.push({ id: nextRunId(), text: '', isBreak: true })
+      isFirstToken = false
       continue
     }
     runs.push({
       id: nextRunId(),
       text: token,
       highlight: { kind: 'content-word', priority: 8, animated: false, emphasisPreset: 'gentle-pop' },
+      tightBefore: isFirstToken && gapStart > 0,
     })
+    isFirstToken = false
   }
   return runs
 }
@@ -143,15 +156,17 @@ export function detectHighlights(text: string): TextRun[] {
   const runs: TextRun[] = []
   let cursor = 0
   for (const c of candidates) {
-    if (c.start > cursor) runs.push(...wordRuns(text.slice(cursor, c.start)))
+    if (c.start > cursor) runs.push(...wordRuns(text.slice(cursor, c.start), cursor))
     runs.push({
       id: nextRunId(),
       text: c.renderedText,
       highlight: { kind: c.kind, priority: c.priority, animated: true, emphasisPreset: PRESET_BY_KIND[c.kind] },
+      // e.g. an opening "(" or "—" immediately before a detected phrase.
+      tightBefore: c.start > 0 && !/\s/.test(text[c.start - 1]),
     })
     cursor = c.end
   }
-  if (cursor < text.length) runs.push(...wordRuns(text.slice(cursor)))
+  if (cursor < text.length) runs.push(...wordRuns(text.slice(cursor), cursor))
 
   applyGlobalCap(runs, text.length)
   return runs

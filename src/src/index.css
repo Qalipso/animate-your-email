@@ -1,29 +1,61 @@
 :root {
-  --text: #3a3a3a;
-  --text-h: #0a0a0a;
-  --bg: #fdfdfd;
-  --border: #e2e2e2;
+  /* Neutrals */
+  --bg: #f6f7f9;
+  --surface: #ffffff;
+  --surface-2: #f1f3f6;
+  --border: #e3e6ec;
+  --border-strong: #cfd4de;
+  --text: #4a5160;
+  --text-h: #10131a;
+  --muted: #79808f;
+
+  /* Accent + semantics */
   --accent: #2b6cff;
+  --accent-strong: #1e57d6;
+  --accent-soft: rgba(43, 108, 255, 0.1);
+  --success: #157a4a;
+  --danger: #c2361f;
+
+  --radius: 12px;
+  --radius-sm: 8px;
+  --shadow-sm: 0 1px 2px rgba(16, 19, 26, 0.06);
+  --shadow-md: 0 6px 24px rgba(16, 19, 26, 0.08);
+  --shadow-lg: 0 12px 40px rgba(16, 19, 26, 0.16);
 
   font: 16px/1.5 -apple-system, 'Segoe UI', Roboto, sans-serif;
   color-scheme: light dark;
   color: var(--text);
   background: var(--bg);
   -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --text: #c7c7c7;
+    --bg: #0f1116;
+    --surface: #171a21;
+    --surface-2: #1e222b;
+    --border: #2a2f3a;
+    --border-strong: #3a4150;
+    --text: #b7bfcc;
     --text-h: #f3f4f6;
-    --bg: #16171d;
-    --border: #2e303a;
+    --muted: #8b93a3;
+
     --accent: #6d9dff;
+    --accent-strong: #86aeff;
+    --accent-soft: rgba(109, 157, 255, 0.14);
+    --success: #56d19a;
+    --danger: #ff8a72;
+
+    --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
+    --shadow-md: 0 6px 24px rgba(0, 0, 0, 0.45);
+    --shadow-lg: 0 12px 40px rgba(0, 0, 0, 0.6);
   }
 }
 
 body {
   margin: 0;
+  background: var(--bg);
 }
 
 #root {
@@ -31,4 +63,20 @@ body {
   display: flex;
   align-items: flex-start;
   justify-content: center;
+}
+
+/* One consistent focus treatment for every control in the app, instead of the browser
+   default disappearing behind custom backgrounds. */
+:where(button, input, select, textarea, summary, a):focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
+}
+
+code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.9em;
+  background: var(--surface-2);
+  border-radius: 4px;
+  padding: 1px 4px;
 }

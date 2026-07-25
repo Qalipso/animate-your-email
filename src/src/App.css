@@ -1,240 +1,426 @@
 .app {
   width: 100%;
-  max-width: 640px;
-  padding: 40px 20px;
+  max-width: 1180px;
+  padding: 40px 24px 64px;
   box-sizing: border-box;
+}
+
+/* ---------- Masthead ---------- */
+
+.masthead {
+  max-width: 640px;
+  margin: 0 auto 24px;
   text-align: center;
 }
 
-.app h1 {
-  font-size: 28px;
-  font-weight: 600;
+.masthead h1 {
+  font-size: clamp(26px, 3.4vw, 34px);
+  font-weight: 700;
+  letter-spacing: -0.02em;
   color: var(--text-h);
-  margin: 0 0 24px;
+  margin: 0 0 8px;
+}
+
+.tagline {
+  font-size: 15px;
+  color: var(--muted);
+  margin: 0;
+  text-wrap: balance;
+}
+
+/* ---------- Workspace ---------- */
+
+/* Single column by default; on a desktop-width screen the preview sits beside the editor
+   and stays put while you scroll the text, instead of the whole tool being a tall stack
+   where the preview lands below the fold. */
+.workspace {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 20px;
+  align-items: start;
+}
+
+@media (min-width: 960px) {
+  .workspace {
+    grid-template-columns: minmax(0, 5fr) minmax(0, 6fr);
+  }
+
+  .preview-panel {
+    position: sticky;
+    top: 24px;
+    /* Backstop for very short viewports: the panel scrolls on its own rather than pushing
+       the primary Copy GIF button off the bottom of the screen. */
+    max-height: calc(100svh - 48px);
+    overflow-y: auto;
+  }
+}
+
+.panel {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-sm);
+  padding: 20px;
+}
+
+.preview-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+/* ---------- Fields ---------- */
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.field + .field,
+.field + .customize {
+  margin-top: 20px;
+}
+
+.field-label {
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.field-footer {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.field-hint {
+  font-size: 12px;
+  color: var(--muted);
+  margin: 0;
 }
 
 .text-area {
   width: 100%;
   box-sizing: border-box;
-  font-size: 16px;
-  line-height: 1.5;
-  padding: 14px 16px;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  background: var(--bg);
+  font-size: 15px;
+  line-height: 1.6;
+  padding: 12px 14px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
   color: var(--text-h);
   resize: vertical;
   font-family: inherit;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.text-area:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
 }
 
 .char-count {
-  text-align: right;
   font-size: 12px;
-  color: var(--text);
-  margin: 4px 2px 16px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
 
-/* Step 2 of the flow: a small, clearly-named set of templates — buttons, not a
-   dropdown, so the choice is visible at a glance instead of hidden behind a click. */
+/* Silently hitting the cap and losing the tail of a paste is worth a warning before it
+   happens, not just a number that quietly stops moving. */
+.char-count-warn {
+  color: var(--danger);
+  font-weight: 600;
+}
+
+/* ---------- Template picker ---------- */
+
 .template-picker {
   display: flex;
   gap: 8px;
-  justify-content: center;
   flex-wrap: wrap;
-  margin-bottom: 20px;
 }
 
 .template-option {
+  font: inherit;
   font-size: 14px;
-  padding: 8px 16px;
-  border: 1px solid var(--border);
+  padding: 7px 16px;
+  border: 1px solid var(--border-strong);
   border-radius: 999px;
-  background: transparent;
+  background: var(--surface);
   color: var(--text);
   cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+}
+
+.template-option:hover {
+  border-color: var(--accent);
+  color: var(--text-h);
 }
 
 .template-option.active {
   border-color: var(--accent);
-  background: rgba(43, 108, 255, 0.1);
+  background: var(--accent-soft);
   color: var(--accent);
   font-weight: 600;
 }
 
+/* ---------- Preview ---------- */
+
+/* The frame's height is now driven by the text (it grows so everything fits in one image),
+   so the preview is bounded by the viewport instead of only by width — otherwise a tall
+   frame pushes the export buttons off-screen in the sticky column. Constraining the *width*
+   via the frame's own aspect ratio keeps the canvas box exactly the drawn area, which the
+   click hit-testing depends on. */
 .preview-frame {
   position: relative;
+  width: 100%;
+  max-width: min(600px, calc(52vh * var(--frame-aspect, 1.6)));
+  margin: 0 auto;
   border: 1px solid var(--border);
-  border-radius: 8px;
-  display: inline-block;
+  border-radius: var(--radius-sm);
   overflow: hidden;
-  margin-bottom: 12px;
+  box-shadow: var(--shadow-md);
+  /* The exported image is always on white; showing it on white here keeps the preview an
+     honest representation of the file in both colour schemes. */
+  background: #ffffff;
 }
 
 .preview-frame canvas {
   display: block;
+  width: 100%;
+  height: auto;
+  cursor: pointer;
 }
 
 .selection-overlay {
   position: absolute;
-  top: 0;
-  left: 0;
+  inset: 0;
+  width: 100%;
+  height: 100%;
   pointer-events: none;
 }
 
-.hint {
+.preview-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.playback {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-left: auto;
+}
+
+/* The frame is auto-fitted, so its real dimensions and type size are information the user
+   otherwise has no way to see — and "fitted to one frame" explains a shrunk font. */
+.frame-meta {
   font-size: 12px;
-  color: var(--text);
-  margin: 0 0 16px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.loop-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--muted);
+  cursor: pointer;
+  user-select: none;
+}
+
+.loop-toggle input {
+  accent-color: var(--accent);
+  margin: 0;
+}
+
+.hint {
+  font-size: 13px;
+  color: var(--muted);
+  margin: 0;
+  text-align: center;
+}
+
+.hint strong {
+  color: var(--text-h);
+  font-weight: 600;
 }
 
 .empty-state {
-  padding: 48px 0;
-  margin: 0 0 8px;
-}
-
-.context-menu {
-  position: fixed;
-  background: var(--bg);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 6px;
   display: flex;
   flex-direction: column;
-  gap: 2px;
-  z-index: 20;
-  white-space: nowrap;
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.2);
-  /* Backstop for viewports too short to fit the whole menu even after the JS
-     reposition — scrolls internally instead of clipping silently. */
-  max-height: calc(100vh - 16px);
-  overflow-y: auto;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  min-height: 320px;
+  color: var(--muted);
+  text-align: center;
 }
 
-.context-menu button {
+/* A quiet stand-in for the preview card so the panel keeps its shape while empty,
+   instead of the layout collapsing and jumping when the first preview appears. */
+.empty-art {
+  width: 100%;
+  max-width: 320px;
+  aspect-ratio: 3 / 2;
+  border-radius: var(--radius-sm);
+  border: 1px dashed var(--border-strong);
+  background:
+    linear-gradient(var(--surface-2) 0 0) padding-box,
+    repeating-linear-gradient(
+      180deg,
+      var(--border) 0 8px,
+      transparent 8px 28px
+    );
+  opacity: 0.6;
+}
+
+/* ---------- Effect picker ---------- */
+
+/* The same list is used inline (after a drag-selection) and in the right-click menu, so
+   discovering effects never depends on knowing that right-click does something. */
+.effect-bar {
+  border: 1px solid var(--accent);
+  background: var(--accent-soft);
+  border-radius: var(--radius-sm);
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.effect-bar-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.effect-bar-title {
   font-size: 13px;
-  padding: 8px 14px;
+  font-weight: 600;
+  color: var(--text-h);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.effect-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  gap: 4px;
+}
+
+.effect-option {
+  font: inherit;
+  font-size: 13px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 10px;
   border: none;
   background: transparent;
   color: var(--text-h);
   text-align: left;
   cursor: pointer;
   border-radius: 6px;
+  width: 100%;
 }
 
-.context-menu button:hover {
-  background: rgba(127, 127, 127, 0.1);
+.effect-option:hover {
+  background: var(--surface);
 }
 
-.scene-nav {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 10px;
-  margin-bottom: 20px;
+.effect-swatch {
+  width: 12px;
+  height: 12px;
+  border-radius: 3px;
+  flex: none;
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.12);
 }
 
-.scene-arrow {
-  font-size: 16px;
-  width: 24px;
-  height: 24px;
-  border: none;
-  background: transparent;
-  color: var(--text);
-  cursor: pointer;
-  padding: 0;
-  line-height: 1;
-}
-
-.scene-arrow:disabled {
-  opacity: 0.3;
-  cursor: default;
-}
-
-.scene-dots {
-  display: flex;
-  gap: 6px;
-}
-
-.scene-dot {
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  border: none;
-  background: var(--border);
-  cursor: pointer;
-  padding: 0;
-}
-
-.scene-dot.active {
-  background: var(--accent);
-}
-
-.chip-row {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  justify-content: center;
-}
-
-.chip {
-  font-size: 13px;
-  padding: 6px 12px;
+.context-menu {
+  position: fixed;
+  background: var(--surface);
   border: 1px solid var(--border);
-  border-radius: 999px;
-  background: transparent;
-  color: var(--text);
-  cursor: pointer;
+  border-radius: var(--radius-sm);
+  padding: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  z-index: 20;
+  white-space: nowrap;
+  box-shadow: var(--shadow-lg);
+  /* Backstop for viewports too short to fit the whole menu even after the JS
+     reposition — scrolls internally instead of clipping silently. */
+  max-height: calc(100vh - 16px);
+  overflow-y: auto;
 }
 
-.chip-on {
-  border-color: var(--accent);
-  background: rgba(43, 108, 255, 0.1);
-  color: var(--accent);
-  font-weight: 600;
-}
+/* ---------- Actions ---------- */
 
 .actions {
-  margin-bottom: 10px;
-}
-
-.primary-actions {
   display: flex;
   gap: 10px;
-  justify-content: center;
   align-items: center;
   flex-wrap: wrap;
 }
 
-/* "Copy GIF" is the strongest call-to-action on the screen — the whole point of this
-   pass is that copying, not saving, is the primary way out of the tool. */
+/* "Copy GIF" is the strongest call-to-action on the screen — copying, not saving, is the
+   primary way out of the tool. */
 .cta-primary {
-  font-size: 17px;
-  font-weight: 700;
-  padding: 14px 32px;
+  font: inherit;
+  font-size: 16px;
+  font-weight: 650;
+  padding: 12px 26px;
   border: none;
-  border-radius: 10px;
+  border-radius: var(--radius-sm);
   background: var(--accent);
   color: #fff;
   cursor: pointer;
-  box-shadow: 0 2px 10px rgba(43, 108, 255, 0.35);
+  box-shadow: 0 2px 10px rgba(43, 108, 255, 0.3);
+  transition: background 0.15s ease, transform 0.05s ease;
+}
+
+.cta-primary:hover:not(:disabled) {
+  background: var(--accent-strong);
+}
+
+.cta-primary:active:not(:disabled) {
+  transform: translateY(1px);
 }
 
 .cta-primary:disabled {
-  opacity: 0.6;
+  opacity: 0.55;
   cursor: default;
   box-shadow: none;
 }
 
-/* "Save GIF" — available, but visibly secondary next to Copy GIF. */
 .cta-secondary {
+  font: inherit;
   font-size: 15px;
   font-weight: 600;
-  padding: 13px 22px;
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  background: transparent;
+  padding: 11px 20px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
   color: var(--text-h);
   cursor: pointer;
+  transition: border-color 0.15s ease;
+}
+
+.cta-secondary:hover:not(:disabled) {
+  border-color: var(--accent);
 }
 
 .cta-secondary:disabled {
@@ -242,62 +428,47 @@
   cursor: default;
 }
 
-/* Cancel / "More export options" — plain text-weight links, the least visually
-   prominent tier, exactly where PNG/ZIP/advanced export belongs by default. */
-.cta-text {
+/* Least prominent tier: cancel, replay, PNG/ZIP — present, never competing. */
+.ghost-button {
+  font: inherit;
   font-size: 13px;
-  padding: 6px 4px;
+  padding: 6px 8px;
   border: none;
   background: transparent;
-  color: var(--text);
-  cursor: pointer;
-  text-decoration: underline;
-  text-underline-offset: 2px;
-}
-
-.export-menu-wrap {
-  position: relative;
-  display: inline-block;
-  margin: 8px 0 4px;
-}
-
-.export-menu {
-  position: absolute;
-  top: calc(100% + 6px);
-  left: 50%;
-  transform: translateX(-50%);
-  background: var(--bg);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 6px;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  z-index: 10;
-  white-space: nowrap;
-}
-
-.export-menu button {
-  font-size: 13px;
-  padding: 8px 12px;
-  border: none;
-  background: transparent;
-  color: var(--text-h);
-  text-align: left;
+  color: var(--muted);
   cursor: pointer;
   border-radius: 6px;
 }
 
-.export-menu button:hover {
-  background: rgba(127, 127, 127, 0.1);
+.ghost-button:hover {
+  color: var(--accent);
+  background: var(--accent-soft);
 }
 
-/* Advanced controls, collapsed by default (native <details> — no JS needed). This is
-   where Transition and the phrase-toggle chips live instead of cluttering the main
-   screen; most people never need to open it. */
+/* GIF encoding is seconds of synchronous work in a worker; without this the app just
+   looks frozen with a disabled button. */
+.progress {
+  height: 4px;
+  border-radius: 999px;
+  background: var(--surface-2);
+  overflow: hidden;
+}
+
+.progress-bar {
+  height: 100%;
+  background: var(--accent);
+  border-radius: 999px;
+  transition: width 0.12s linear;
+}
+
+.export-menu-wrap {
+  position: relative;
+  align-self: flex-start;
+}
+
+/* ---------- Advanced ---------- */
+
 .customize {
-  margin-top: 20px;
-  text-align: left;
   border-top: 1px solid var(--border);
   padding-top: 14px;
 }
@@ -305,9 +476,8 @@
 .customize summary {
   font-size: 13px;
   font-weight: 600;
-  color: var(--text);
+  color: var(--muted);
   cursor: pointer;
-  text-align: center;
   list-style: none;
 }
 
@@ -327,30 +497,87 @@
   margin-top: 14px;
   display: flex;
   flex-direction: column;
-  gap: 14px;
-  align-items: center;
+  gap: 16px;
 }
 
 .select-field {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 6px;
   font-size: 12px;
-  color: var(--text);
-  text-align: left;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted);
 }
 
 .select-field select {
+  font: inherit;
   font-size: 14px;
+  font-weight: 400;
+  letter-spacing: normal;
+  text-transform: none;
   padding: 8px 10px;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  background: var(--bg);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
   color: var(--text-h);
 }
 
+.chip-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.chip {
+  font: inherit;
+  font-size: 13px;
+  padding: 5px 12px;
+  border: 1px solid var(--border-strong);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--muted);
+  cursor: pointer;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chip-on {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-weight: 600;
+}
+
+/* ---------- Status ---------- */
+
 .status {
-  font-size: 14px;
+  font-size: 13px;
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: var(--surface-2);
   color: var(--text);
-  margin-top: 12px;
+}
+
+.status-success {
+  border-color: color-mix(in srgb, var(--success) 40%, transparent);
+  color: var(--success);
+  background: color-mix(in srgb, var(--success) 8%, transparent);
+}
+
+.status-error {
+  border-color: color-mix(in srgb, var(--danger) 40%, transparent);
+  color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 8%, transparent);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * {
+    transition-duration: 0.01ms !important;
+  }
 }

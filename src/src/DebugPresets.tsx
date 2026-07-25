@@ -3,29 +3,21 @@ import { buildAnimatedDocument, layoutSceneForRender } from './engine/document'
 import { computeSceneTiming, renderScene } from './engine/render'
 import { buildTimeline, renderTimelineFrame, type Timeline } from './engine/timeline'
 import { exportDocumentAsGif } from './engine/exportV2'
-import type {
-  AnimatedDocument,
-  EmphasisPresetId,
-  EntrancePresetId,
-  Scene,
-  TransitionPresetId,
-} from './engine/model'
+import { GIF_FPS } from './engine/quality'
+import type { AnimatedDocument, EmphasisPresetId, Scene, TransitionPresetId } from './engine/model'
 import './DebugPresets.css'
 
-type PresetRole = 'entrance' | 'emphasis' | 'transition'
+// 'entrance' is gone: the base text layer is always fully visible from frame 1, so all
+// four entrance presets now render byte-identical output. Keeping them in the matrix would
+// have produced four rows of "evidence" that prove nothing.
+type PresetRole = 'emphasis' | 'transition'
 
 interface PresetDef {
   role: PresetRole
-  id: EntrancePresetId | EmphasisPresetId | TransitionPresetId
+  id: EmphasisPresetId | TransitionPresetId
   name: string
 }
 
-const ENTRANCE_PRESETS: PresetDef[] = [
-  { role: 'entrance', id: 'fade', name: 'Fade' },
-  { role: 'entrance', id: 'soft-rise', name: 'Soft Rise' },
-  { role: 'entrance', id: 'blur-reveal', name: 'Blur Reveal' },
-  { role: 'entrance', id: 'word-cascade', name: 'Word Cascade' },
-]
 const EMPHASIS_PRESETS: PresetDef[] = [
   { role: 'emphasis', id: 'marker-highlight', name: 'Marker Highlight' },
   { role: 'emphasis', id: 'underline-draw', name: 'Underline Draw' },
@@ -42,7 +34,7 @@ const TRANSITION_PRESETS: PresetDef[] = [
   { role: 'transition', id: 'crossfade', name: 'Crossfade' },
   { role: 'transition', id: 'slide-up', name: 'Slide Up' },
 ]
-const ALL_PRESETS = [...ENTRANCE_PRESETS, ...EMPHASIS_PRESETS, ...TRANSITION_PRESETS]
+const ALL_PRESETS = [...EMPHASIS_PRESETS, ...TRANSITION_PRESETS]
 
 interface Sample {
   id: string
@@ -89,26 +81,20 @@ async function frameToDataUrl(width: number, height: number, draw: (ctx: Offscre
   return URL.createObjectURL(blob)
 }
 
-/** Builds a single-scene test document for an entrance preset, or forces every animated run in the scene to a specific emphasis preset for emphasis-preset testing. Debug-only — production highlight detection always assigns the emphasis preset itself. */
-async function buildEntranceOrEmphasisDoc(
-  sample: Sample,
-  role: 'entrance' | 'emphasis',
-  presetId: string,
-): Promise<AnimatedDocument> {
+/** Forces every animated run in the scene to a specific emphasis preset. Debug-only — production highlight detection always assigns the emphasis preset itself. */
+async function buildEmphasisDoc(sample: Sample, presetId: string): Promise<AnimatedDocument> {
   const doc = await buildAnimatedDocument(sample.text, {
     mode: sample.mode,
     modeIsOverridden: true,
-    entrance: role === 'entrance' ? (presetId as EntrancePresetId) : 'fade',
+    entrance: 'fade',
     transition: 'crossfade',
   })
-  if (role === 'emphasis') {
-    for (const scene of doc.scenes) {
-      for (const block of scene.blocks) {
-        for (const run of block.runs) {
-          if (run.highlight) {
-            run.highlight.animated = true
-            run.highlight.emphasisPreset = presetId as EmphasisPresetId
-          }
+  for (const scene of doc.scenes) {
+    for (const block of scene.blocks) {
+      for (const run of block.runs) {
+        if (run.highlight) {
+          run.highlight.animated = true
+          run.highlight.emphasisPreset = presetId as EmphasisPresetId
         }
       }
     }
@@ -120,7 +106,7 @@ async function buildEntranceOrEmphasisDoc(
 async function buildTransitionDoc(sample: Sample, presetId: string): Promise<AnimatedDocument> {
   const [a, b] = sample.text.split('\n\n')
   const docA = await buildAnimatedDocument(a || sample.text, { mode: 'one-card', modeIsOverridden: true, entrance: 'fade', transition: presetId as TransitionPresetId })
-  const docB = await buildAnimatedDocument(b || 'Second scene.', { mode: 'one-card', modeIsOverridden: true, entrance: 'soft-rise', transition: presetId as TransitionPresetId })
+  const docB = await buildAnimatedDocument(b || 'Second scene.', { mode: 'one-card', modeIsOverridden: true, entrance: 'fade', transition: presetId as TransitionPresetId })
   const sceneA: Scene = { ...docA.scenes[0], transition: presetId as TransitionPresetId }
   const sceneB: Scene = { ...docB.scenes[0] }
   return { ...docA, scenes: [sceneA, sceneB], truncated: false }
@@ -144,19 +130,18 @@ async function runCell(preset: PresetDef, sample: Sample): Promise<CellResult> {
       midFrame = await frameToDataUrl(doc.width, doc.height, (ctx) => renderTimelineFrame(ctx, doc, timeline!, totalMs / 2))
       finalFrame = await frameToDataUrl(doc.width, doc.height, (ctx) => renderTimelineFrame(ctx, doc, timeline!, totalMs))
     } else {
-      doc = await buildEntranceOrEmphasisDoc(sample, preset.role, preset.id)
+      doc = await buildEmphasisDoc(sample, preset.id)
       const scene = doc.scenes[0]
       const layout = await layoutSceneForRender(doc, scene)
-      const timing = computeSceneTiming(layout, scene.entrance)
+      const timing = computeSceneTiming(layout)
       totalMs = timing.totalMs
-      firstFrame = await frameToDataUrl(doc.width, doc.height, (ctx) => renderScene(ctx, doc, layout, scene.entrance, 0, timing))
-      midFrame = await frameToDataUrl(doc.width, doc.height, (ctx) => renderScene(ctx, doc, layout, scene.entrance, totalMs / 2, timing))
-      finalFrame = await frameToDataUrl(doc.width, doc.height, (ctx) => renderScene(ctx, doc, layout, scene.entrance, totalMs, timing))
+      firstFrame = await frameToDataUrl(doc.width, doc.height, (ctx) => renderScene(ctx, doc, layout, 0, timing))
+      midFrame = await frameToDataUrl(doc.width, doc.height, (ctx) => renderScene(ctx, doc, layout, totalMs / 2, timing))
+      finalFrame = await frameToDataUrl(doc.width, doc.height, (ctx) => renderScene(ctx, doc, layout, totalMs, timing))
     }
 
-    const fps = 12
-    const frameCount = Math.round((totalMs / 1000) * fps)
-    const gifBlob = await exportDocumentAsGif(doc, fps)
+    const gifBlob = await exportDocumentAsGif(doc, GIF_FPS)
+    const frameCount = Math.round(totalMs / (1000 / GIF_FPS))
     const exportDurationMs = performance.now() - t0
 
     return {
@@ -240,14 +225,13 @@ function DebugPresets() {
     <div className="qa-page">
       <h1>Preset visual QA matrix</h1>
       <p>
-        Every entrance/emphasis/transition preset × short/multiline/Cyrillic/emoji samples. Each cell shows first/mid/final
+        Every emphasis/transition preset × short/multiline/Cyrillic/emoji samples. Each cell shows first/mid/final
         frame, frame count, export duration, and GIF file size — from the real render + export pipeline, not a mock.
       </p>
       <button className="qa-run-all" onClick={runAll} disabled={running}>
         {running ? `Running… ${(progress * 100).toFixed(0)}%` : 'Run all'}
       </button>
 
-      {renderRole('entrance', ENTRANCE_PRESETS, 'Entrance')}
       {renderRole('emphasis', EMPHASIS_PRESETS, 'Emphasis')}
       {renderRole('transition', TRANSITION_PRESETS, 'Transition')}
     </div>

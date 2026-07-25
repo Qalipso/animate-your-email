@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import {
   applyEmphasisToWordRange,
   buildAnimatedDocument,
@@ -6,47 +6,62 @@ import {
   layoutSceneForRender,
   toggleRunAnimation,
 } from './engine/document'
-import { cancelExport, exportDocumentAsGif, exportScenesAsZip, exportSceneAsPng, ExportCancelledError } from './engine/exportV2'
-import { autoSelectMode } from './engine/modeSelect'
-import { computeSceneTiming, renderScene } from './engine/render'
+import { cancelExport, exportDocumentAsGif, exportSceneAsPng, ExportCancelledError } from './engine/exportV2'
+import { MODE_PRESETS, autoSelectMode } from './engine/modeSelect'
+import { computeSceneTiming, contentOffsetY, renderScene } from './engine/render'
 import { PADDING } from './engine/layout'
-import type {
-  AnimatedDocument,
-  EmphasisPresetId,
-  LayoutWord,
-  OutputMode,
-  TextLayout,
-  TransitionPresetId,
-} from './engine/model'
+import type { AnimatedDocument, EmphasisPresetId, LayoutWord, OutputMode, TextLayout } from './engine/model'
 import { MAX_CHARACTERS } from './engine/model'
 import './App.css'
 
 const GENERATE_DEBOUNCE_MS = 400
+/** Beat of stillness at the end of a preview loop before it starts over. */
+const LOOP_PAUSE_MS = 700
 
-const TEMPLATE_OPTIONS: { id: OutputMode | 'auto'; name: string }[] = [
-  { id: 'auto', name: 'Auto' },
-  { id: 'one-card', name: 'Card' },
-  { id: 'paragraph', name: 'Paragraph' },
-  { id: 'story', name: 'Story' },
+/** A mode's un-shrunk type size, so the UI can tell the reader when the fitter stepped it down. */
+const BASE_FONT_SIZE: Record<OutputMode, number> = {
+  'one-card': MODE_PRESETS['one-card'].fontSize,
+  paragraph: MODE_PRESETS.paragraph.fontSize,
+  story: MODE_PRESETS.story.fontSize,
+}
+
+const TEMPLATE_OPTIONS: { id: OutputMode | 'auto'; name: string; hint: string }[] = [
+  { id: 'auto', name: 'Auto', hint: 'Pick a size from the length of the text' },
+  { id: 'one-card', name: 'Card', hint: 'Large type for a short line' },
+  { id: 'paragraph', name: 'Paragraph', hint: 'Reading size for a paragraph' },
+  { id: 'story', name: 'Story', hint: 'Compact type for long text' },
 ]
 
-const EMPHASIS_OPTIONS: { id: EmphasisPresetId; name: string }[] = [
-  { id: 'marker-highlight', name: 'Marker Highlight' },
-  { id: 'underline-draw', name: 'Underline Draw' },
-  { id: 'soft-glow', name: 'Soft Glow' },
-  { id: 'gentle-pop', name: 'Gentle Pop' },
-  { id: 'shimmer', name: 'Shimmer' },
-  { id: 'weight-shift', name: 'Weight Shift' },
-  { id: 'burn', name: 'Burn' },
-  { id: 'wash-away', name: 'Wash Away' },
-  { id: 'bow-highlight', name: 'Pink Highlight + Bow' },
-  { id: 'glitch', name: 'Glitch' },
+/**
+ * `swatch` is the colour the effect actually paints with, so the picker previews the
+ * result instead of being ten identical rows of text.
+ */
+const EMPHASIS_OPTIONS: { id: EmphasisPresetId; name: string; swatch: string }[] = [
+  { id: 'marker-highlight', name: 'Marker Highlight', swatch: '#ffd64f' },
+  { id: 'underline-draw', name: 'Underline Draw', swatch: '#2b6cff' },
+  { id: 'soft-glow', name: 'Soft Glow', swatch: '#6d9dff' },
+  { id: 'gentle-pop', name: 'Gentle Pop', swatch: '#1a1a1a' },
+  { id: 'shimmer', name: 'Shimmer', swatch: '#c9d4e8' },
+  { id: 'weight-shift', name: 'Weight Shift', swatch: '#4a4a4a' },
+  { id: 'burn', name: 'Burn', swatch: '#c43e14' },
+  { id: 'wash-away', name: 'Wash Away', swatch: '#789ab0' },
+  { id: 'bow-highlight', name: 'Pink Highlight + Bow', swatch: '#ff85b2' },
+  { id: 'glitch', name: 'Glitch', swatch: '#3cdcff' },
 ]
 
-const TRANSITION_OPTIONS: { id: TransitionPresetId; name: string }[] = [
-  { id: 'crossfade', name: 'Crossfade' },
-  { id: 'slide-up', name: 'Slide Up' },
-]
+type StatusKind = 'info' | 'success' | 'error'
+interface Status {
+  kind: StatusKind
+  text: string
+}
+
+/** A phrase the user has singled out and can now apply an effect to. */
+interface EffectTarget {
+  blockId: string
+  firstRunId: string
+  lastRunId: string
+  label: string
+}
 
 /** Finds the line/word nearest a point — forgiving hit test used while extending a drag selection. */
 function hitTestNearestWord(layout: TextLayout, x: number, y: number): number | null {
@@ -98,27 +113,26 @@ const SAMPLE_TEXT =
   'One customer told us "this is exactly what we needed" — and that stuck with the whole team.\n\n' +
   'Get started with the new features today.'
 
+function prefersReducedMotion(): boolean {
+  return typeof window !== 'undefined' && window.matchMedia?.('(prefers-reduced-motion: reduce)').matches === true
+}
+
 function App() {
   const [rawText, setRawText] = useState(SAMPLE_TEXT)
   const [modeOverride, setModeOverride] = useState<OutputMode | null>(null)
-  const [transition, setTransition] = useState<TransitionPresetId>('crossfade')
   const [doc, setDoc] = useState<AnimatedDocument | null>(null)
-  const [sceneIndex, setSceneIndex] = useState(0)
   const [version, setVersion] = useState(0)
-  const [status, setStatus] = useState('')
+  const [status, setStatus] = useState<Status | null>(null)
   const [isGenerating, setIsGenerating] = useState(false)
   const [isCopying, setIsCopying] = useState(false)
   const [isExporting, setIsExporting] = useState(false)
-  const [exportMenuOpen, setExportMenuOpen] = useState(false)
+  const [exportProgress, setExportProgress] = useState<number | null>(null)
   const [layout, setLayout] = useState<TextLayout | null>(null)
   const [selection, setSelection] = useState<{ start: number; end: number } | null>(null)
-  const [contextMenu, setContextMenu] = useState<{
-    x: number
-    y: number
-    blockId: string
-    firstRunId: string
-    lastRunId: string
-  } | null>(null)
+  const [effectTarget, setEffectTarget] = useState<EffectTarget | null>(null)
+  const [isLooping, setIsLooping] = useState(() => !prefersReducedMotion())
+  const [replayNonce, setReplayNonce] = useState(0)
+  const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null)
 
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
   const overlayCanvasRef = useRef<HTMLCanvasElement | null>(null)
@@ -137,14 +151,26 @@ function App() {
   const generationIdRef = useRef(0)
 
   const effectiveMode = modeOverride ?? autoSelectMode(rawText)
-  const scene = doc?.scenes[sceneIndex] ?? null
+  // Documents are always a single frame — everything the user pasted has to be readable at
+  // once, so the builder fits it rather than paginating (see fitIntoOneFrame).
+  const scene = doc?.scenes[0] ?? null
+
+  const updateSelection = useCallback((next: { start: number; end: number } | null) => {
+    selectionRef.current = next
+    setSelection(next)
+  }, [])
+
+  const clearTargeting = useCallback(() => {
+    updateSelection(null)
+    setEffectTarget(null)
+    setContextMenu(null)
+  }, [updateSelection])
 
   // Auto-generate the preview whenever the text or template settings change — no
   // separate "Generate" step. Debounced so it doesn't rebuild on every keystroke.
   useEffect(() => {
     if (!rawText.trim()) {
       setDoc(null)
-      setStatus('')
       setIsGenerating(false)
       return
     }
@@ -154,29 +180,32 @@ function App() {
       buildAnimatedDocument(rawText, {
         mode: effectiveMode,
         modeIsOverridden: modeOverride !== null,
-        entrance: 'fade',
-        transition,
       }).then((built) => {
         if (generationIdRef.current !== genId) return // superseded by a newer change
         setDoc(built)
-        setSceneIndex(0)
         setVersion((v) => v + 1)
-        setStatus(built.truncated ? `Kept the first ${built.scenes.length} scenes — text was too long to fit more.` : '')
+        setStatus(
+          built.truncated
+            ? {
+                kind: 'info',
+                text: 'Even at the smallest readable size this much text does not fit in one image — the end was cut. Shorten it to keep everything.',
+              }
+            : null,
+        )
         setIsGenerating(false)
       })
     }, GENERATE_DEBOUNCE_MS)
     return () => clearTimeout(timer)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [rawText, effectiveMode, modeOverride, transition])
+  }, [rawText, effectiveMode, modeOverride])
 
   // Re-derive the current scene's layout whenever the doc, scene, or a toggle
   // (`version`) changes. Async because layoutSceneForRender awaits font readiness.
   useEffect(() => {
     let cancelled = false
-    // Word indices in `selection`/`contextMenu` are only valid for the layout they were
-    // computed against — scene navigation invalidates them just as much as a text edit.
-    updateSelection(null)
-    setContextMenu(null)
+    // Word indices in `selection`/`effectTarget` are only valid for the layout they were
+    // computed against, so any rebuild has to drop them.
+    clearTargeting()
     if (!doc || !scene) {
       setLayout(null)
       return
@@ -187,23 +216,47 @@ function App() {
     return () => {
       cancelled = true
     }
-  }, [doc, scene, version])
+  }, [doc, scene, version, clearTargeting])
 
-  // Live preview: play the current scene's animation once and settle, driven by the
-  // exact same renderScene()/computeSceneTiming() used for export.
+  /**
+   * Sizes a canvas's backing store to the device pixel ratio and returns a context whose
+   * transform is in layout units. Without this the preview is rendered at 1 CSS pixel per
+   * logical pixel and then scaled up by the display, which is exactly the soft, fuzzy text
+   * the preview is supposed to be proving isn't there.
+   */
+  const prepareCanvas = useCallback((canvas: HTMLCanvasElement, width: number, height: number, dpr: number) => {
+    const deviceWidth = Math.round(width * dpr)
+    const deviceHeight = Math.round(height * dpr)
+    if (canvas.width !== deviceWidth || canvas.height !== deviceHeight) {
+      canvas.width = deviceWidth
+      canvas.height = deviceHeight
+    }
+    const ctx = canvas.getContext('2d')
+    ctx?.setTransform(dpr, 0, 0, dpr, 0, 0)
+    return ctx
+  }, [])
+
+  // Live preview: play the current scene's animation, driven by the exact same
+  // renderScene()/computeSceneTiming() used for export.
   useEffect(() => {
     const canvas = canvasRef.current
     if (!canvas || !doc || !scene || !layout) return
-    const ctx = canvas.getContext('2d')
+    const dpr = Math.min(3, window.devicePixelRatio || 1)
+    const ctx = prepareCanvas(canvas, doc.width, doc.height, dpr)
     if (!ctx) return
 
-    const timing = computeSceneTiming(layout, scene.entrance)
-    const start = performance.now()
+    const timing = computeSceneTiming(layout)
+    const loopMs = timing.totalMs + LOOP_PAUSE_MS
+    let start = performance.now()
 
     function tick() {
-      const elapsed = performance.now() - start
-      renderScene(ctx!, doc!, layout!, scene!.entrance, elapsed, timing)
-      if (elapsed < timing.totalMs) {
+      let elapsed = performance.now() - start
+      if (isLooping && elapsed >= loopMs) {
+        start = performance.now()
+        elapsed = 0
+      }
+      renderScene(ctx!, doc!, layout!, elapsed, timing, 0, 0, dpr)
+      if (isLooping || elapsed < timing.totalMs) {
         rafRef.current = requestAnimationFrame(tick)
       }
     }
@@ -213,7 +266,7 @@ function App() {
     return () => {
       if (rafRef.current) cancelAnimationFrame(rafRef.current)
     }
-  }, [doc, scene, layout])
+  }, [doc, scene, layout, isLooping, replayNonce, prepareCanvas])
 
   // Selection highlight overlay — a separate, non-interactive canvas drawn only for the
   // live editor. Kept entirely out of renderScene()/renderTimelineFrame() so selection UI
@@ -221,36 +274,32 @@ function App() {
   useEffect(() => {
     const canvas = overlayCanvasRef.current
     if (!canvas || !doc) return
-    const ctx = canvas.getContext('2d')
+    const dpr = Math.min(3, window.devicePixelRatio || 1)
+    const ctx = prepareCanvas(canvas, doc.width, doc.height, dpr)
     if (!ctx) return
-    ctx.clearRect(0, 0, canvas.width, canvas.height)
+    ctx.clearRect(0, 0, doc.width, doc.height)
     if (!selection || !layout) return
     const flat = layout.lines.flatMap((l) => l.words)
     const lo = Math.min(selection.start, selection.end)
     const hi = Math.max(selection.start, selection.end)
     if (lo === hi) return
+    const offsetY = contentOffsetY(doc, layout)
     ctx.fillStyle = 'rgba(43, 108, 255, 0.25)'
     for (let i = lo; i <= hi; i++) {
       const w = flat[i]
       if (!w) continue
-      ctx.fillRect(PADDING + w.x - 2, PADDING + w.y, w.width + 4, w.height)
+      ctx.fillRect(PADDING + w.x - 2, offsetY + w.y, w.width + 4, w.height)
     }
-  }, [selection, layout, doc])
+  }, [selection, layout, doc, prepareCanvas])
 
   // Dismiss the context menu on an outside click or Escape.
   useEffect(() => {
     if (!contextMenu) return
     function handlePointerDown(e: MouseEvent) {
-      if (!(e.target as HTMLElement).closest('.context-menu')) {
-        setContextMenu(null)
-        updateSelection(null)
-      }
+      if (!(e.target as HTMLElement).closest('.context-menu')) setContextMenu(null)
     }
     function handleKey(e: KeyboardEvent) {
-      if (e.key === 'Escape') {
-        setContextMenu(null)
-        updateSelection(null)
-      }
+      if (e.key === 'Escape') clearTargeting()
     }
     document.addEventListener('mousedown', handlePointerDown)
     document.addEventListener('keydown', handleKey)
@@ -258,7 +307,7 @@ function App() {
       document.removeEventListener('mousedown', handlePointerDown)
       document.removeEventListener('keydown', handleKey)
     }
-  }, [contextMenu])
+  }, [contextMenu, clearTargeting])
 
   // Clamp the menu into the viewport — with 10 presets it can otherwise render partly
   // (or entirely) below the fold with no way to reach the rest, since it's
@@ -275,14 +324,47 @@ function App() {
     el.style.top = `${Math.min(contextMenu.y, maxTop)}px`
   }, [contextMenu])
 
+  /**
+   * Canvas coordinates in layout units. The canvas is laid out responsively (its CSS width
+   * is whatever the column allows), so the client-to-layout ratio has to be measured rather
+   * than assumed to be 1 — otherwise every hit test is wrong on any screen narrower than
+   * the document.
+   */
   function localCoords(e: React.MouseEvent<HTMLCanvasElement>): { x: number; y: number } {
-    const rect = canvasRef.current!.getBoundingClientRect()
-    return { x: e.clientX - rect.left - PADDING, y: e.clientY - rect.top - PADDING }
+    const canvas = canvasRef.current!
+    const rect = canvas.getBoundingClientRect()
+    const ratio = rect.width > 0 && doc ? doc.width / rect.width : 1
+    const offsetY = doc && layout ? contentOffsetY(doc, layout) : PADDING
+    return {
+      x: (e.clientX - rect.left) * ratio - PADDING,
+      y: (e.clientY - rect.top) * ratio - offsetY,
+    }
   }
 
-  function updateSelection(next: { start: number; end: number } | null) {
-    selectionRef.current = next
-    setSelection(next)
+  /** Resolves a word-index range into an effect target, clamped to the anchor word's block. */
+  function buildEffectTarget(lo: number, hi: number): EffectTarget | null {
+    if (!doc || !layout) return null
+    const flat = layout.lines.flatMap((l) => l.words)
+    const firstWord = flat[lo]
+    if (!firstWord) return null
+    const blockId = findBlockIdForRun(doc, firstWord.runId)
+    if (!blockId) return null
+    // Clamp to the anchor word's block — no cross-paragraph merges.
+    let lastWord = firstWord
+    let lastIndex = lo
+    for (let i = hi; i >= lo; i--) {
+      const w = flat[i]
+      if (w && findBlockIdForRun(doc, w.runId) === blockId) {
+        lastWord = w
+        lastIndex = i
+        break
+      }
+    }
+    const label = flat
+      .slice(lo, lastIndex + 1)
+      .map((w) => w.text)
+      .join(' ')
+    return { blockId, firstRunId: firstWord.runId, lastRunId: lastWord.runId, label }
   }
 
   function handleMouseDown(e: React.MouseEvent<HTMLCanvasElement>) {
@@ -308,8 +390,9 @@ function App() {
     if (!draggingRef.current) return
     draggingRef.current = false
     const current = selectionRef.current
-    // A plain click (no real drag across words) keeps the old single-word toggle behavior.
-    if (current && current.start === current.end && doc && layout) {
+    if (!current || !doc || !layout) return
+    // A plain click (no real drag across words) keeps the single-word toggle behaviour.
+    if (current.start === current.end) {
       const flat = layout.lines.flatMap((l) => l.words)
       const word = flat[current.start]
       if (word) {
@@ -317,13 +400,18 @@ function App() {
         setVersion((v) => v + 1)
       }
       updateSelection(null)
+      return
     }
+    // A real drag selects a phrase and offers the effect picker inline, so choosing an
+    // effect no longer depends on knowing that right-click does something.
+    const lo = Math.min(current.start, current.end)
+    const hi = Math.max(current.start, current.end)
+    setEffectTarget(buildEffectTarget(lo, hi))
   }
 
   function handleContextMenu(e: React.MouseEvent<HTMLCanvasElement>) {
     e.preventDefault()
     if (!doc || !layout) return
-    const flat = layout.lines.flatMap((l) => l.words)
     const current = selectionRef.current
     let lo: number
     let hi: number
@@ -336,29 +424,19 @@ function App() {
       if (idx === null) return
       lo = idx
       hi = idx
+      updateSelection({ start: idx, end: idx })
     }
-    const firstWord = flat[lo]
-    if (!firstWord) return
-    const blockId = findBlockIdForRun(doc, firstWord.runId)
-    if (!blockId) return
-    // Clamp to the anchor word's block — no cross-paragraph merges.
-    let lastWord = firstWord
-    for (let i = hi; i >= lo; i--) {
-      const w = flat[i]
-      if (w && findBlockIdForRun(doc, w.runId) === blockId) {
-        lastWord = w
-        break
-      }
-    }
-    setContextMenu({ x: e.clientX, y: e.clientY, blockId, firstRunId: firstWord.runId, lastRunId: lastWord.runId })
+    const target = buildEffectTarget(lo, hi)
+    if (!target) return
+    setEffectTarget(target)
+    setContextMenu({ x: e.clientX, y: e.clientY })
   }
 
   function handleChooseEmphasis(preset: EmphasisPresetId) {
-    if (!doc || !contextMenu) return
-    applyEmphasisToWordRange(doc, contextMenu.blockId, contextMenu.firstRunId, contextMenu.lastRunId, preset)
+    if (!doc || !effectTarget) return
+    applyEmphasisToWordRange(doc, effectTarget.blockId, effectTarget.firstRunId, effectTarget.lastRunId, preset)
     setVersion((v) => v + 1)
-    setContextMenu(null)
-    updateSelection(null)
+    clearTargeting()
   }
 
   function handleChipToggle(runId: string) {
@@ -371,6 +449,7 @@ function App() {
   async function handleCopyGif() {
     if (!doc || !scene) return
     setIsCopying(true)
+    setExportProgress(0)
     try {
       if (typeof ClipboardItem === 'undefined' || !navigator.clipboard?.write) {
         throw new Error('Copying images isn’t supported in this browser — use Save GIF instead.')
@@ -383,67 +462,62 @@ function App() {
       // quietly isn't animated.
       const gifSupported = typeof ClipboardItem.supports !== 'function' || ClipboardItem.supports('image/gif')
       if (gifSupported) {
-        setStatus('Preparing GIF to copy…')
-        const gifPromise = exportDocumentAsGif(doc, 12)
+        setStatus({ kind: 'info', text: 'Preparing GIF to copy…' })
+        const gifPromise = exportDocumentAsGif(doc, undefined, setExportProgress)
         // Passing a Promise (not an already-resolved Blob) keeps this write() call
         // itself synchronous within the click handler, which Safari requires to honor
         // the user gesture for clipboard permission — write() awaits it internally.
         await navigator.clipboard.write([new ClipboardItem({ 'image/gif': gifPromise })])
         const blob = await gifPromise
-        setStatus(`Copied — ${(blob.size / 1024).toFixed(0)} KB. Paste it into your email.`)
+        setStatus({ kind: 'success', text: `Copied — ${formatSize(blob.size)}. Paste it into your email.` })
       } else {
-        setStatus('This browser can’t copy animated GIFs — copying a static image instead…')
+        setStatus({ kind: 'info', text: 'This browser can’t copy animated GIFs — copying a static image instead…' })
         const pngPromise = exportSceneAsPng(doc, scene)
         await navigator.clipboard.write([new ClipboardItem({ 'image/png': pngPromise })])
         const blob = await pngPromise
-        setStatus(`Copied a static image — ${(blob.size / 1024).toFixed(0)} KB. This browser can’t copy animated GIFs to the clipboard; use Save GIF for the animated file.`)
+        setStatus({
+          kind: 'success',
+          text: `Copied a static image — ${formatSize(blob.size)}. This browser can’t copy animated GIFs to the clipboard; use Save GIF for the animated file.`,
+        })
       }
     } catch (err) {
       if (err instanceof ExportCancelledError) {
-        setStatus('Export cancelled.')
+        setStatus({ kind: 'info', text: 'Export cancelled.' })
       } else {
-        setStatus(`Copy failed: ${(err as Error).message}`)
+        setStatus({ kind: 'error', text: `Copy failed: ${(err as Error).message}` })
       }
     } finally {
       setIsCopying(false)
+      setExportProgress(null)
     }
   }
 
   async function handleSaveGif() {
     if (!doc) return
     setIsExporting(true)
-    setStatus('Rendering GIF in the background…')
+    setExportProgress(0)
+    setStatus({ kind: 'info', text: 'Rendering GIF in the background…' })
     try {
-      const blob = await exportDocumentAsGif(doc, 12)
+      const blob = await exportDocumentAsGif(doc, undefined, setExportProgress)
       triggerDownload(blob, 'animation.gif')
-      setStatus(`Saved — ${(blob.size / 1024).toFixed(0)} KB.`)
+      setStatus({ kind: 'success', text: `Saved — ${formatSize(blob.size)}.` })
     } catch (err) {
       if (err instanceof ExportCancelledError) {
-        setStatus('Export cancelled.')
+        setStatus({ kind: 'info', text: 'Export cancelled.' })
       } else {
-        setStatus(`Export failed: ${(err as Error).message}`)
+        setStatus({ kind: 'error', text: `Export failed: ${(err as Error).message}` })
       }
     } finally {
       setIsExporting(false)
+      setExportProgress(null)
     }
-  }
-
-  function handleCancelExport() {
-    cancelExport()
   }
 
   async function handleExportPng() {
     if (!doc || !scene) return
-    setExportMenuOpen(false)
     const blob = await exportSceneAsPng(doc, scene)
-    triggerDownload(blob, `scene-${sceneIndex + 1}.png`)
-  }
-
-  async function handleExportZip() {
-    if (!doc) return
-    setExportMenuOpen(false)
-    const blob = await exportScenesAsZip(doc)
-    triggerDownload(blob, 'scenes.zip')
+    triggerDownload(blob, 'still.png')
+    setStatus({ kind: 'success', text: `Saved a still PNG — ${formatSize(blob.size)}.` })
   }
 
   const animatedRuns = useMemo(() => {
@@ -453,136 +527,212 @@ function App() {
   }, [scene, version])
 
   const busy = isCopying || isExporting
+  const nearCharLimit = rawText.length > MAX_CHARACTERS * 0.9
+
+  const effectPicker = (onPick: (id: EmphasisPresetId) => void) =>
+    EMPHASIS_OPTIONS.map((o) => (
+      <button key={o.id} type="button" className="effect-option" onClick={() => onPick(o.id)}>
+        <span className="effect-swatch" style={{ background: o.swatch }} aria-hidden="true" />
+        {o.name}
+      </button>
+    ))
 
   return (
     <div className="app">
-      <h1>Animate your email</h1>
+      <header className="masthead">
+        <h1>Animate your email</h1>
+        <p className="tagline">
+          Paste your text, pick what should stand out, and copy an animated GIF straight into Gmail or Outlook.
+          Everything runs in this browser — nothing is uploaded.
+        </p>
+      </header>
 
-      <textarea
-        className="text-area"
-        value={rawText}
-        onChange={(e) => setRawText(e.target.value.slice(0, MAX_CHARACTERS))}
-        placeholder="Paste your email or message…"
-        rows={5}
-      />
-      <div className="char-count">{rawText.length} / {MAX_CHARACTERS}</div>
-
-      <div className="template-picker">
-        {TEMPLATE_OPTIONS.map((t) => {
-          const active = t.id === 'auto' ? modeOverride === null : modeOverride === t.id
-          return (
-            <button
-              key={t.id}
-              type="button"
-              className={active ? 'template-option active' : 'template-option'}
-              onClick={() => setModeOverride(t.id === 'auto' ? null : t.id)}
-            >
-              {t.name}
-            </button>
-          )
-        })}
-      </div>
-
-      {doc && scene ? (
-        <>
-          <div className="preview-frame">
-            <canvas
-              ref={canvasRef}
-              width={doc.width}
-              height={doc.height}
-              onMouseDown={handleMouseDown}
-              onMouseMove={handleMouseMove}
-              onMouseUp={handleMouseUp}
-              onContextMenu={handleContextMenu}
-              style={{ cursor: 'pointer' }}
+      <div className="workspace">
+        <section className="panel compose-panel" aria-label="Compose">
+          <div className="field">
+            <label className="field-label" htmlFor="source-text">
+              Your text
+            </label>
+            <textarea
+              id="source-text"
+              className="text-area"
+              value={rawText}
+              onChange={(e) => setRawText(e.target.value.slice(0, MAX_CHARACTERS))}
+              placeholder="Paste your email or message…"
+              rows={8}
             />
-            <canvas ref={overlayCanvasRef} width={doc.width} height={doc.height} className="selection-overlay" />
-          </div>
-          <p className="hint">Click a word to toggle it, or drag + right-click to choose an effect for a phrase.</p>
-
-          {doc.scenes.length > 1 && (
-            <div className="scene-nav">
-              <button className="scene-arrow" onClick={() => setSceneIndex((i) => Math.max(0, i - 1))} disabled={sceneIndex === 0} aria-label="Previous scene">‹</button>
-              <div className="scene-dots">
-                {doc.scenes.map((s, i) => (
-                  <button
-                    key={s.id}
-                    className={i === sceneIndex ? 'scene-dot active' : 'scene-dot'}
-                    onClick={() => setSceneIndex(i)}
-                    aria-label={`Scene ${i + 1}`}
-                  />
-                ))}
-              </div>
-              <button className="scene-arrow" onClick={() => setSceneIndex((i) => Math.min(doc.scenes.length - 1, i + 1))} disabled={sceneIndex === doc.scenes.length - 1} aria-label="Next scene">›</button>
+            <div className="field-footer">
+              <span className="field-hint">
+                Wrap a phrase in <code>*stars*</code> or <code>[[brackets]]</code> to force emphasis.
+              </span>
+              <span className={nearCharLimit ? 'char-count char-count-warn' : 'char-count'}>
+                {rawText.length} / {MAX_CHARACTERS}
+              </span>
             </div>
-          )}
-
-          <div className="actions primary-actions">
-            <button className="cta-primary" onClick={handleCopyGif} disabled={busy}>
-              {isCopying ? 'Copying…' : 'Copy GIF'}
-            </button>
-            <button className="cta-secondary" onClick={handleSaveGif} disabled={busy}>
-              {isExporting ? 'Saving…' : 'Save GIF'}
-            </button>
-            {busy && (
-              <button className="cta-text" onClick={handleCancelExport}>Cancel</button>
-            )}
           </div>
 
-          <div className="export-menu-wrap">
-            <button className="cta-text" onClick={() => setExportMenuOpen((v) => !v)}>More export options ▾</button>
-            {exportMenuOpen && (
-              <div className="export-menu">
-                <button onClick={handleExportPng}>PNG (current scene)</button>
-                <button onClick={handleExportZip}>ZIP (all scenes, PNG)</button>
-              </div>
+          <div className="field">
+            <span className="field-label">Template</span>
+            <div className="template-picker" role="group" aria-label="Template">
+              {TEMPLATE_OPTIONS.map((t) => {
+                const active = t.id === 'auto' ? modeOverride === null : modeOverride === t.id
+                return (
+                  <button
+                    key={t.id}
+                    type="button"
+                    title={t.hint}
+                    aria-pressed={active}
+                    className={active ? 'template-option active' : 'template-option'}
+                    onClick={() => setModeOverride(t.id === 'auto' ? null : t.id)}
+                  >
+                    {t.name}
+                  </button>
+                )
+              })}
+            </div>
+            {modeOverride === null && doc && (
+              <p className="field-hint">
+                Auto picked <strong>{TEMPLATE_OPTIONS.find((t) => t.id === doc.mode)?.name}</strong> for this text.
+              </p>
             )}
           </div>
 
           <details className="customize">
-            <summary>Customize</summary>
+            <summary>Advanced</summary>
             <div className="customize-body">
-              <label className="select-field">
-                Transition between scenes
-                <select value={transition} onChange={(e) => setTransition(e.target.value as TransitionPresetId)}>
-                  {TRANSITION_OPTIONS.map((o) => (
-                    <option key={o.id} value={o.id}>{o.name}</option>
-                  ))}
-                </select>
-              </label>
-
               {animatedRuns.length > 0 && (
-                <div className="chip-row">
-                  {animatedRuns.map((r) => (
-                    <button
-                      key={r.id}
-                      className={r.highlight!.animated ? 'chip chip-on' : 'chip'}
-                      onClick={() => handleChipToggle(r.id)}
-                      title={r.highlight!.kind}
-                    >
-                      {r.text}
-                    </button>
-                  ))}
+                <div className="field">
+                  <span className="field-label">Animated phrases</span>
+                  <div className="chip-row">
+                    {animatedRuns.map((r) => (
+                      <button
+                        key={r.id}
+                        type="button"
+                        aria-pressed={r.highlight!.animated}
+                        className={r.highlight!.animated ? 'chip chip-on' : 'chip'}
+                        onClick={() => handleChipToggle(r.id)}
+                        title={`Detected as: ${r.highlight!.kind}`}
+                      >
+                        {r.text}
+                      </button>
+                    ))}
+                  </div>
                 </div>
               )}
             </div>
           </details>
-        </>
-      ) : (
-        <p className="hint empty-state">{isGenerating ? 'Generating preview…' : 'Paste some text above to get started.'}</p>
-      )}
+        </section>
 
-      {status && <p className="status">{status}</p>}
+        <section className="panel preview-panel" aria-label="Preview">
+          {doc && scene ? (
+            <>
+              <div
+                className="preview-frame"
+                style={{ '--frame-aspect': doc.width / doc.height } as React.CSSProperties}
+              >
+                <canvas
+                  ref={canvasRef}
+                  onMouseDown={handleMouseDown}
+                  onMouseMove={handleMouseMove}
+                  onMouseUp={handleMouseUp}
+                  onContextMenu={handleContextMenu}
+                  aria-label="Animation preview — click a word to toggle its emphasis"
+                />
+                <canvas ref={overlayCanvasRef} className="selection-overlay" aria-hidden="true" />
+              </div>
+
+              <div className="preview-toolbar">
+                <span className="frame-meta">
+                  {doc.width} × {doc.height} · {doc.fontSize}px
+                  {doc.fontSize < BASE_FONT_SIZE[doc.mode] && ' · fitted to one frame'}
+                </span>
+
+                <div className="playback">
+                  <button className="ghost-button" onClick={() => setReplayNonce((n) => n + 1)}>
+                    ↻ Replay
+                  </button>
+                  <label className="loop-toggle">
+                    <input type="checkbox" checked={isLooping} onChange={(e) => setIsLooping(e.target.checked)} />
+                    Loop
+                  </label>
+                </div>
+              </div>
+
+              {effectTarget ? (
+                <div className="effect-bar">
+                  <div className="effect-bar-head">
+                    <span className="effect-bar-title">
+                      Effect for “{truncate(effectTarget.label, 42)}”
+                    </span>
+                    <button className="ghost-button" onClick={clearTargeting}>
+                      Cancel
+                    </button>
+                  </div>
+                  <div className="effect-grid">{effectPicker(handleChooseEmphasis)}</div>
+                </div>
+              ) : (
+                <p className="hint">
+                  <strong>Click</strong> a word to animate or un-animate it. <strong>Drag</strong> across a phrase to
+                  pick an effect for it.
+                </p>
+              )}
+
+              <div className="actions">
+                <button className="cta-primary" onClick={handleCopyGif} disabled={busy}>
+                  {isCopying ? 'Copying…' : 'Copy GIF'}
+                </button>
+                <button className="cta-secondary" onClick={handleSaveGif} disabled={busy}>
+                  {isExporting ? 'Saving…' : 'Save GIF'}
+                </button>
+                {busy && (
+                  <button className="ghost-button" onClick={cancelExport}>
+                    Cancel
+                  </button>
+                )}
+              </div>
+
+              {busy && (
+                <div className="progress" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round((exportProgress ?? 0) * 100)}>
+                  <div className="progress-bar" style={{ width: `${Math.round((exportProgress ?? 0) * 100)}%` }} />
+                </div>
+              )}
+
+              <div className="export-menu-wrap">
+                <button className="ghost-button" onClick={handleExportPng} disabled={busy}>
+                  Save a still PNG instead
+                </button>
+              </div>
+            </>
+          ) : (
+            <div className="empty-state">
+              <div className="empty-art" aria-hidden="true" />
+              <p>{isGenerating ? 'Generating preview…' : 'Paste some text to see it animate.'}</p>
+            </div>
+          )}
+
+          {status && (
+            <p className={`status status-${status.kind}`} role={status.kind === 'error' ? 'alert' : 'status'}>
+              {status.text}
+            </p>
+          )}
+        </section>
+      </div>
 
       {contextMenu && (
         <div ref={contextMenuRef} className="context-menu" style={{ left: contextMenu.x, top: contextMenu.y }}>
-          {EMPHASIS_OPTIONS.map((o) => (
-            <button key={o.id} onClick={() => handleChooseEmphasis(o.id)}>{o.name}</button>
-          ))}
+          {effectPicker(handleChooseEmphasis)}
         </div>
       )}
     </div>
   )
+}
+
+function truncate(s: string, max: number): string {
+  return s.length <= max ? s : `${s.slice(0, max - 1)}…`
+}
+
+function formatSize(bytes: number): string {
+  return bytes >= 1024 * 1024 ? `${(bytes / 1024 / 1024).toFixed(1)} MB` : `${(bytes / 1024).toFixed(0)} KB`
 }
 
 function triggerDownload(blob: Blob, filename: string) {

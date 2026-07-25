@@ -13,18 +13,31 @@ class MockGradient {
   addColorStop() {}
 }
 
+/** A fillRect the renderer issued, so tests can assert on painted geometry, not just that nothing threw. */
+export interface RecordedRect {
+  x: number
+  y: number
+  w: number
+  h: number
+  fillStyle: string
+}
+
 export class MockCanvasContext {
   font = '16px sans-serif'
   fillStyle = '#000'
   strokeStyle = '#000'
   lineWidth = 1
+  lineCap = 'butt'
   globalAlpha = 1
   globalCompositeOperation = 'source-over'
   filter = 'none'
   shadowColor = 'transparent'
   shadowBlur = 0
   textBaseline = 'alphabetic'
+  imageSmoothingEnabled = true
+  imageSmoothingQuality = 'low'
   canvas: MockCanvas
+  readonly rects: RecordedRect[] = []
 
   constructor(canvas: MockCanvas) {
     this.canvas = canvas
@@ -38,19 +51,25 @@ export class MockCanvasContext {
     return { width } as TextMetrics
   }
 
-  fillRect() {}
+  fillRect(x: number, y: number, w: number, h: number) {
+    this.rects.push({ x, y, w, h, fillStyle: String(this.fillStyle) })
+  }
+  clearRect() {}
   strokeRect() {}
   fillText() {}
   strokeText() {}
   beginPath() {}
+  closePath() {}
   moveTo() {}
   lineTo() {}
+  arc() {}
   stroke() {}
   fill() {}
   save() {}
   restore() {}
   translate() {}
   scale() {}
+  setTransform() {}
   rotate() {}
   createLinearGradient() {
     return new MockGradient() as unknown as CanvasGradient

@@ -1,5 +1,14 @@
 import { detectHighlights } from './highlight'
-import { clampFontSize, createMeasurer, metricsFor, wrapBlocksIntoLines, positionLines, type WrappedLine } from './layout'
+import {
+  PADDING,
+  clampFontSize,
+  createMeasurer,
+  metricsFor,
+  positionLines,
+  wrapBlocksIntoLines,
+  type Ctx2D,
+  type WrappedLine,
+} from './layout'
 import { MODE_PRESETS } from './modeSelect'
 import type {
   AnimatedDocument,
@@ -11,7 +20,7 @@ import type {
   TextRun,
   TransitionPresetId,
 } from './model'
-import { MAX_ANIMATED_PHRASES_PER_SCENE, MAX_CHARACTERS, MAX_SCENES } from './model'
+import { MAX_ANIMATED_PHRASES_PER_SCENE, MAX_CHARACTERS, MAX_FRAME_HEIGHT, MIN_READABLE_FONT_PX } from './model'
 
 let idCounter = 0
 function nextId(prefix: string): string {
@@ -50,16 +59,16 @@ function synthesizeSceneBlocks(sceneLines: WrappedLine[]): TextBlock[] {
     for (const word of line.words) {
       const lastRun = currentBlock.runs[currentBlock.runs.length - 1]
       if (lastRun && lastRun.id === word.runId) {
-        lastRun.text = `${lastRun.text} ${word.text}`
+        lastRun.text = word.tightBefore ? `${lastRun.text}${word.text}` : `${lastRun.text} ${word.text}`
       } else {
-        currentBlock.runs.push({ id: word.runId, text: word.text, highlight: word.highlight })
+        currentBlock.runs.push({ id: word.runId, text: word.text, highlight: word.highlight, tightBefore: word.tightBefore })
       }
     }
   }
   return blocks
 }
 
-/** Disables the lowest-priority animated runs in a scene beyond MAX_ANIMATED_PHRASES_PER_SCENE. */
+/** Disables the lowest-priority animated runs beyond MAX_ANIMATED_PHRASES_PER_SCENE. */
 function capPhrasesPerScene(blocks: TextBlock[]) {
   const animatedRuns = blocks
     .flatMap((b) => b.runs)
@@ -77,20 +86,57 @@ export interface BuildDocumentOptions {
   transition?: TransitionPresetId
 }
 
+interface FitResult {
+  fontSize: number
+  lines: WrappedLine[]
+  contentHeight: number
+  truncated: boolean
+}
+
 /**
- * The core "prove the foundation" pipeline: raw text -> highlight detection -> paragraph
- * blocks -> global word-wrap -> pagination into <= MAX_SCENES scenes by height budget ->
- * per-scene block re-synthesis + phrase cap. Always rebuilt from scratch on text change;
- * word-click toggles mutate the resulting document in place instead (see toggleWord()).
+ * Fits the whole text into a single frame.
+ *
+ * The product rule is that however much text is pasted, the reader sees all of it at once —
+ * so there is no pagination and no scene navigation. Two levers get it there, in the order
+ * that costs the least legibility: the frame grows taller (up to MAX_FRAME_HEIGHT), and only
+ * once that ceiling is reached does the type step down, never below MIN_READABLE_FONT_PX.
+ *
+ * Text that still doesn't fit at the minimum size is cut at a line boundary and flagged, so
+ * the caller can say so — the one thing this must never do is render lines off-frame and
+ * pretend the image is complete.
+ */
+function fitIntoOneFrame(ctx: Ctx2D, blocks: TextBlock[], startFontSize: number, width: number): FitResult {
+  for (let fontSize = clampFontSize(startFontSize); ; fontSize -= 1) {
+    const metrics = metricsFor(fontSize, width, MAX_FRAME_HEIGHT)
+    const wrapped = wrapBlocksIntoLines(ctx, blocks, metrics)
+    const measured = positionLines(ctx, wrapped, metrics)
+
+    if (measured.contentHeight <= metrics.contentHeight) {
+      return { fontSize, lines: wrapped, contentHeight: measured.contentHeight, truncated: false }
+    }
+    if (fontSize <= MIN_READABLE_FONT_PX) {
+      const fitted: WrappedLine[] = []
+      let used = 0
+      for (const line of wrapped) {
+        const gap = line.isFirstOfParagraph && fitted.length > 0 ? metrics.paragraphGap : 0
+        if (used + gap + metrics.lineHeight > metrics.contentHeight) break
+        used += gap + metrics.lineHeight
+        fitted.push(line)
+      }
+      return { fontSize, lines: fitted, contentHeight: used, truncated: fitted.length < wrapped.length }
+    }
+  }
+}
+
+/**
+ * The core pipeline: raw text -> highlight detection -> paragraph blocks -> word-wrap ->
+ * single-frame fit -> block re-synthesis + phrase cap. Always rebuilt from scratch on text
+ * change; word-click toggles mutate the resulting document in place instead (see
+ * toggleRunAnimation()).
  */
 export async function buildAnimatedDocument(rawTextInput: string, options: BuildDocumentOptions): Promise<AnimatedDocument> {
   const rawText = rawTextInput.slice(0, MAX_CHARACTERS)
   const preset = MODE_PRESETS[options.mode]
-  // Font size is fixed per mode (never auto-shrunk to force a fit) — clamped defensively
-  // to MIN_READABLE_FONT_PX so a future mode/config change can't silently produce
-  // unreadable text; overflow is handled by pagination instead, not by shrinking.
-  const fontSize = clampFontSize(preset.fontSize)
-  const metrics = metricsFor(fontSize, preset.width, preset.height)
 
   const flatRuns = detectHighlights(rawText)
   const paragraphBlocks = splitIntoParagraphBlocks(flatRuns)
@@ -98,41 +144,20 @@ export async function buildAnimatedDocument(rawTextInput: string, options: Build
   // createMeasurer() awaits font readiness internally — nothing here measures text
   // before the selected font has actually loaded.
   const ctx = await createMeasurer()
-  const allLines = wrapBlocksIntoLines(ctx, paragraphBlocks, metrics)
+  const fit = fitIntoOneFrame(ctx, paragraphBlocks, preset.fontSize, preset.width)
 
-  const sceneLineGroups: WrappedLine[][] = [[]]
-  let usedHeight = 0
-  let truncated = false
+  // The frame is exactly as tall as its content needs, but never shorter than the mode's
+  // own proportions — a three-word card shouldn't come out as a letterbox strip.
+  const height = Math.max(preset.height, Math.ceil(fit.contentHeight) + PADDING * 2)
 
-  for (const line of allLines) {
-    const gap = line.isFirstOfParagraph && sceneLineGroups[sceneLineGroups.length - 1].length > 0 ? metrics.paragraphGap : 0
-    const needed = usedHeight + gap + metrics.lineHeight
-    const currentGroup = sceneLineGroups[sceneLineGroups.length - 1]
-    if (needed > metrics.contentHeight && currentGroup.length > 0) {
-      if (sceneLineGroups.length >= MAX_SCENES) {
-        truncated = true
-        break
-      }
-      sceneLineGroups.push([])
-      usedHeight = 0
-    }
-    sceneLineGroups[sceneLineGroups.length - 1].push(line)
-    usedHeight += (sceneLineGroups[sceneLineGroups.length - 1].length > 1 ? gap : 0) + metrics.lineHeight
-  }
+  const blocks = synthesizeSceneBlocks(fit.lines)
+  capPhrasesPerScene(blocks)
 
-  const entrance = options.entrance ?? 'fade'
-  const transition = options.transition ?? 'crossfade'
-
-  const scenes: Scene[] = sceneLineGroups
-    .filter((group) => group.length > 0)
-    .map((group) => {
-      const blocks = synthesizeSceneBlocks(group)
-      capPhrasesPerScene(blocks)
-      return { id: nextId('scene'), blocks, entrance, transition }
-    })
-
-  if (scenes.length === 0) {
-    scenes.push({ id: nextId('scene'), blocks: [{ id: nextId('block'), runs: [] }], entrance, transition })
+  const scene: Scene = {
+    id: nextId('scene'),
+    blocks: blocks.length > 0 ? blocks : [{ id: nextId('block'), runs: [] }],
+    entrance: options.entrance ?? 'fade',
+    transition: options.transition ?? 'crossfade',
   }
 
   return {
@@ -140,11 +165,11 @@ export async function buildAnimatedDocument(rawTextInput: string, options: Build
     rawText,
     mode: options.mode,
     modeIsOverridden: options.modeIsOverridden,
-    scenes,
-    truncated,
-    fontSize,
+    scenes: [scene],
+    truncated: fit.truncated,
+    fontSize: fit.fontSize,
     width: preset.width,
-    height: preset.height,
+    height,
   }
 }
 
@@ -207,12 +232,15 @@ export function applyEmphasisToWordRange(
     const lo = Math.min(startIdx, endIdx)
     const hi = Math.max(startIdx, endIdx)
     const covered = block.runs.slice(lo, hi + 1)
-    const text = covered.map((r) => r.text).join(' ')
+    // Join respecting each run's source-level spacing, so merging a selection that ends on
+    // punctuation ("three major updates.") doesn't reintroduce the space before the period.
+    const text = covered.reduce((acc, r, i) => (i === 0 ? r.text : r.tightBefore ? `${acc}${r.text}` : `${acc} ${r.text}`), '')
     const priority = Math.min(...covered.map((r) => r.highlight?.priority ?? 8))
     const merged: TextRun = {
       id: nextId('run'),
       text,
       highlight: { kind: 'content-word', priority, animated: true, emphasisPreset: preset },
+      tightBefore: covered[0].tightBefore,
     }
     block.runs.splice(lo, hi - lo + 1, merged)
     return true

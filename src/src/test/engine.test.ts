@@ -2,8 +2,12 @@ import { describe, expect, it } from 'vitest'
 import { buildAnimatedDocument, layoutSceneForRender, toggleRunAnimation } from '../engine/document'
 import { detectHighlights } from '../engine/highlight'
 import { createMeasurer, metricsFor, wrapBlocksIntoLines } from '../engine/layout'
+import { computeSceneTiming, renderScene } from '../engine/render'
 import { buildTimeline, renderTimelineFrame } from '../engine/timeline'
-import { MAX_CHARACTERS, MAX_SCENES } from '../engine/model'
+import { snapDelayMs } from '../gifExport'
+import { MAX_CHARACTERS, MAX_FRAME_HEIGHT, MIN_READABLE_FONT_PX, type TextLayout } from '../engine/model'
+import { MODE_PRESETS } from '../engine/modeSelect'
+import { MockCanvas, type MockCanvasContext } from './mockCanvas'
 
 const LONG_PARAGRAPH_DOC = `We are thrilled to share the results of our biggest launch yet, spanning three continents and dozens of teams working around the clock for months.
 
@@ -19,6 +23,13 @@ Get started with the new dashboard today and let us know what you think.`
 
 function buildStory(text: string) {
   return buildAnimatedDocument(text, { mode: 'story', modeIsOverridden: true })
+}
+
+/** Reconstructs the string a reader actually sees, honouring per-word source spacing. */
+function visibleText(layout: TextLayout): string {
+  return layout.lines
+    .map((line) => line.words.map((w, i) => (i > 0 && !w.tightBefore ? ' ' : '') + w.text).join(''))
+    .join(' ')
 }
 
 describe('retina display export', () => {
@@ -49,9 +60,9 @@ describe('very long words', () => {
 })
 
 describe('multiple paragraphs', () => {
-  it('preserves every paragraph across scenes with no content lost', async () => {
+  it('preserves every paragraph in the single fitted frame with no content lost', async () => {
     const doc = await buildStory(LONG_PARAGRAPH_DOC)
-    expect(doc.scenes.length).toBeGreaterThan(1)
+    expect(doc.truncated).toBe(false)
     const reconstructed = doc.scenes
       .flatMap((s) => s.blocks.flatMap((b) => b.runs.map((r) => r.text)))
       .join(' ')
@@ -134,26 +145,40 @@ describe('1500-character input', () => {
   })
 })
 
-describe('automatic pagination', () => {
-  it('splits long text into multiple scenes, none overflowing, and caps at MAX_SCENES', async () => {
+describe('single-frame fitting', () => {
+  it('puts long text in exactly one frame that does not overflow', async () => {
     const doc = await buildStory(LONG_PARAGRAPH_DOC)
-    expect(doc.scenes.length).toBeGreaterThan(1)
-    expect(doc.scenes.length).toBeLessThanOrEqual(MAX_SCENES)
-    for (const scene of doc.scenes) {
-      const layout = await layoutSceneForRender(doc, scene)
-      expect(layout.overflowed).toBe(false)
-    }
+    expect(doc.scenes.length).toBe(1)
+    const layout = await layoutSceneForRender(doc, doc.scenes[0])
+    expect(layout.overflowed).toBe(false)
+    expect(doc.height).toBeLessThanOrEqual(MAX_FRAME_HEIGHT)
+    expect(doc.fontSize).toBeGreaterThanOrEqual(MIN_READABLE_FONT_PX)
   })
 
-  it('flags truncated when content genuinely cannot fit in MAX_SCENES', async () => {
+  it('keeps the mode’s own type size when the text already fits', async () => {
+    const doc = await buildAnimatedDocument('Thanks for everything today.', { mode: 'one-card', modeIsOverridden: true })
+    expect(doc.fontSize).toBe(MODE_PRESETS['one-card'].fontSize)
+    expect(doc.height).toBe(MODE_PRESETS['one-card'].height) // never shorter than the mode's proportions
+  })
+
+  it('shrinks type rather than paginating, and never below the readable floor', async () => {
+    const doc = await buildStory('word '.repeat(300).slice(0, MAX_CHARACTERS))
+    expect(doc.scenes.length).toBe(1)
+    expect(doc.fontSize).toBeLessThan(MODE_PRESETS.story.fontSize)
+    expect(doc.fontSize).toBeGreaterThanOrEqual(MIN_READABLE_FONT_PX)
+    const layout = await layoutSceneForRender(doc, doc.scenes[0])
+    expect(layout.overflowed).toBe(false)
+  })
+
+  it('never silently drops content: text either fits whole or the document says it was cut', async () => {
     const massive = Array.from({ length: 30 }, (_, i) => `Paragraph number ${i + 1} with several words of filler content to take up space.`).join('\n\n')
     const doc = await buildStory(massive.slice(0, MAX_CHARACTERS))
-    expect(doc.scenes.length).toBeLessThanOrEqual(MAX_SCENES)
-    // Either it fit (unlikely at 1500 chars / 6 scenes) or it was marked truncated —
-    // either way no scene should silently overflow.
-    for (const scene of doc.scenes) {
-      const layout = await layoutSceneForRender(doc, scene)
-      expect(layout.overflowed).toBe(false)
+    const layout = await layoutSceneForRender(doc, doc.scenes[0])
+    expect(layout.overflowed).toBe(false)
+
+    if (!doc.truncated) {
+      const kept = doc.scenes[0].blocks.flatMap((b) => b.runs.map((r) => r.text)).join(' ')
+      expect(kept.split(/\s+/).filter(Boolean).length).toBe(doc.rawText.split(/\s+/).filter(Boolean).length)
     }
   })
 })
@@ -197,6 +222,71 @@ describe('exported frame dimensions', () => {
       expect(frame.width).toBe(doc.width)
       expect(frame.height).toBe(doc.height)
       expect(frame.data.length).toBe(doc.width * doc.height * 4)
+    }
+  })
+})
+
+describe('punctuation and quoting fidelity', () => {
+  it('does not insert a space between a detected phrase and the punctuation glued to it', async () => {
+    const text = 'We shipped on July 12, 2026. Revenue grew 24%, and (three teams) helped.'
+    const doc = await buildAnimatedDocument(text, { mode: 'paragraph', modeIsOverridden: true })
+    const layout = await layoutSceneForRender(doc, doc.scenes[0])
+    // The old flat-run flattening lost the "no whitespace here" fact and rendered
+    // "July 12, 2026 ." — a character the user never typed.
+    expect(visibleText(layout)).not.toMatch(/\s[.,!?;:%)]/)
+  })
+
+  it('keeps the quotation marks around a detected quote', () => {
+    const runs = detectHighlights('One customer told us "this is exactly what we needed" today.')
+    const quote = runs.find((r) => r.highlight?.kind === 'quote')
+    expect(quote?.text).toBe('"this is exactly what we needed"')
+  })
+})
+
+describe('phrase-level emphasis geometry', () => {
+  it('paints a multi-word marker highlight as one contiguous band per line, not one band per word', async () => {
+    // Long enough that the 15%-of-text animation budget can afford the whole phrase.
+    const doc = await buildAnimatedDocument(
+      'We announced [[three major updates]] and shared a live demo with the whole team at the launch event, and everyone left delighted with it.',
+      { mode: 'paragraph', modeIsOverridden: true },
+    )
+    const layout = await layoutSceneForRender(doc, doc.scenes[0])
+    const phraseWords = layout.lines.flatMap((l) => l.words).filter((w) => w.highlight?.animated)
+    expect(phraseWords.length).toBeGreaterThan(1) // the phrase really is multi-word
+    expect(new Set(phraseWords.map((w) => w.runId)).size).toBe(1)
+
+    const canvas = new MockCanvas(doc.width, doc.height)
+    const ctx = canvas.getContext() as unknown as MockCanvasContext
+    const timing = computeSceneTiming(layout)
+    renderScene(ctx as never, doc, layout, timing.emphasisEndMs, timing)
+
+    // Everything except the white page fill; at full progress that is the highlight band.
+    const bands = ctx.rects.filter((r) => r.fillStyle !== '#ffffff')
+
+    // One band per line the phrase occupies — the regression being guarded against is one
+    // band per *word*, which leaves an unpainted gap at every word space.
+    const linesCovered = layout.lines.filter((l) => l.words.some((w) => w.highlight?.animated))
+    expect(bands.length).toBe(linesCovered.length)
+    expect(bands.length).toBeLessThan(phraseWords.length)
+
+    for (const line of linesCovered) {
+      const inLine = line.words.filter((w) => w.highlight?.animated)
+      const expectedWidth = Math.max(...inLine.map((w) => w.x + w.width)) - Math.min(...inLine.map((w) => w.x)) + 4
+      expect(bands.some((b) => Math.abs(b.w - expectedWidth) < 0.001)).toBe(true)
+    }
+  })
+})
+
+describe('GIF frame timing', () => {
+  it('snaps the frame delay to a whole centisecond so playback matches the rendered clock', () => {
+    // GIF stores delays in 1/100s. 12fps is 83.33ms, which the encoder rounds to 80ms —
+    // the file then plays 4% faster than every frame was rendered for.
+    expect(snapDelayMs(20)).toBe(50)
+    expect(snapDelayMs(25)).toBe(40)
+    expect(snapDelayMs(12)).toBe(80)
+    expect(snapDelayMs(1000)).toBeGreaterThanOrEqual(20) // never a zero/absurd delay
+    for (const fps of [10, 12, 15, 20, 24, 25, 30, 50]) {
+      expect(snapDelayMs(fps) % 10).toBe(0)
     }
   })
 })

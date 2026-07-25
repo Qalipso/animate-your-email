@@ -1,6 +1,7 @@
-import { zipSync } from 'fflate'
 import { layoutSceneForRender } from './document'
+import { GIF_FPS, SUPERSAMPLE } from './quality'
 import { computeSceneTiming, renderScene } from './render'
+import type { GifWorkerResponse } from './gifWorker'
 import type { AnimatedDocument, Scene } from './model'
 
 export class ExportCancelledError extends Error {
@@ -28,7 +29,11 @@ export function cancelExport(): void {
   activeReject = null
 }
 
-export function exportDocumentAsGif(doc: AnimatedDocument, fps = 12): Promise<Blob> {
+export function exportDocumentAsGif(
+  doc: AnimatedDocument,
+  fps = GIF_FPS,
+  onProgress?: (fraction: number) => void,
+): Promise<Blob> {
   if (activeWorker) {
     return Promise.reject(new Error('An export is already in progress — cancel it first.'))
   }
@@ -45,9 +50,13 @@ export function exportDocumentAsGif(doc: AnimatedDocument, fps = 12): Promise<Bl
       worker.terminate()
     }
 
-    worker.onmessage = (e: MessageEvent<{ type: string; blob?: Blob; message?: string }>) => {
+    worker.onmessage = (e: MessageEvent<GifWorkerResponse>) => {
+      if (e.data.type === 'progress') {
+        onProgress?.(e.data.value)
+        return
+      }
       finish()
-      if (e.data.type === 'done' && e.data.blob) resolve(e.data.blob)
+      if (e.data.type === 'done') resolve(e.data.blob)
       else reject(new Error(e.data.message ?? 'GIF export failed'))
     }
     worker.onerror = (err) => {
@@ -58,29 +67,29 @@ export function exportDocumentAsGif(doc: AnimatedDocument, fps = 12): Promise<Bl
   })
 }
 
+/**
+ * A scene's final settled frame, supersampled and filtered down to the output size — the
+ * same fidelity the GIF path uses, so a copied still and a copied animation never differ
+ * in sharpness.
+ */
 async function renderSceneSettled(doc: AnimatedDocument, scene: Scene): Promise<OffscreenCanvas> {
   const layout = await layoutSceneForRender(doc, scene)
-  const timing = computeSceneTiming(layout, scene.entrance)
+  const timing = computeSceneTiming(layout)
+
+  const hiCanvas = new OffscreenCanvas(doc.width * SUPERSAMPLE, doc.height * SUPERSAMPLE)
+  const hiCtx = hiCanvas.getContext('2d') as OffscreenCanvasRenderingContext2D
+  hiCtx.scale(SUPERSAMPLE, SUPERSAMPLE)
+  renderScene(hiCtx, doc, layout, timing.totalMs, timing, 0, 0, SUPERSAMPLE)
+
   const canvas = new OffscreenCanvas(doc.width, doc.height)
   const ctx = canvas.getContext('2d') as OffscreenCanvasRenderingContext2D
-  renderScene(ctx, doc, layout, scene.entrance, timing.totalMs, timing)
+  ctx.imageSmoothingEnabled = true
+  ctx.imageSmoothingQuality = 'high'
+  ctx.drawImage(hiCanvas, 0, 0, doc.width, doc.height)
   return canvas
 }
 
 export async function exportSceneAsPng(doc: AnimatedDocument, scene: Scene): Promise<Blob> {
   const canvas = await renderSceneSettled(doc, scene)
   return canvas.convertToBlob({ type: 'image/png' })
-}
-
-/** All scenes' settled frames as PNGs, bundled into a single ZIP (not N separate downloads). */
-export async function exportScenesAsZip(doc: AnimatedDocument): Promise<Blob> {
-  const entries: Record<string, Uint8Array> = {}
-  for (let i = 0; i < doc.scenes.length; i++) {
-    const canvas = await renderSceneSettled(doc, doc.scenes[i])
-    const blob = await canvas.convertToBlob({ type: 'image/png' })
-    const bytes = new Uint8Array(await blob.arrayBuffer())
-    entries[`scene-${String(i + 1).padStart(2, '0')}.png`] = bytes
-  }
-  const zipped = zipSync(entries, { level: 0 }) // PNG is already compressed; STORED-equivalent is fine and fast
-  return new Blob([zipped], { type: 'application/zip' })
 }

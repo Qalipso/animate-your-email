@@ -54,6 +54,13 @@ export interface TextRun {
   highlight?: HighlightSpec
   /** Marks a paragraph break in the flat run stream produced by highlight detection. */
   isBreak?: boolean
+  /**
+   * True when no whitespace separated this run from the previous one in the source text —
+   * e.g. the "." after a detected `July 12, 2026` span, or an opening "(" before one.
+   * Layout must then join them with zero advance instead of a word space, otherwise the
+   * rendered output silently gains spaces the user never typed ("July 12, 2026 .").
+   */
+  tightBefore?: boolean
 }
 
 export interface TextBlock {
@@ -93,6 +100,8 @@ export interface LayoutWord {
   highlight?: HighlightSpec
   /** Index of this word among only the highlighted+animated words in the scene, for stagger. */
   animatedIndex: number
+  /** See TextRun.tightBefore — no word space between this word and the previous one on the line. */
+  tightBefore?: boolean
 }
 
 export interface LayoutLine {
@@ -110,7 +119,12 @@ export interface TextLayout {
 }
 
 export const MAX_CHARACTERS = 1500
-export const MAX_SCENES = 6
+/**
+ * Tallest frame the single-frame fitter will produce before it starts shrinking type
+ * instead. Everything the user pastes has to be readable in one image, so the frame has to
+ * be allowed to grow — but an email client will not thank us for an arbitrarily long one.
+ */
+export const MAX_FRAME_HEIGHT = 1000
 export const MAX_ANIMATED_FRACTION = 0.15
 export const MAX_ANIMATED_PHRASES_PER_SCENE = 5
 export const MIN_READABLE_FONT_PX = 16
