@@ -1,5 +1,5 @@
 {
-  "name": "src",
+  "name": "animate-your-email",
   "private": true,
   "version": "0.0.0",
   "type": "module",
@@ -8,7 +8,11 @@
     "build": "tsc -b && vite build",
     "lint": "oxlint",
     "preview": "vite preview",
-    "test": "vitest run"
+    "test": "vitest run",
+    "test:e2e": "playwright test",
+    "test:unit": "vitest run",
+    "typecheck": "tsc -b",
+    "samples": "node scripts/generate-samples.mjs"
   },
   "dependencies": {
     "gifenc": "^1.0.3",
@@ -16,6 +20,7 @@
     "react-dom": "^19.2.7"
   },
   "devDependencies": {
+    "@playwright/test": "^1.62.0",
     "@types/node": "^24.13.2",
     "@types/react": "^19.2.17",
     "@types/react-dom": "^19.2.3",
@@ -24,5 +29,6 @@
     "typescript": "~6.0.2",
     "vite": "^8.1.1",
     "vitest": "^4.1.10"
-  }
+  },
+  "description": "Turn text into a short animated GIF that fits in one frame, for pasting into emails."
 }

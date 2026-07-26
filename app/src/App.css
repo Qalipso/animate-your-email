@@ -465,6 +465,25 @@
   transition: transform 0.12s linear;
 }
 
+/* Stated before the click, not as a status message after it: the clipboard limitation is a
+   property of the browser, so the user deserves to know it while choosing an action. */
+.disclosure {
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--muted);
+  margin: 0;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+}
+
+.disclosure strong {
+  color: var(--text-h);
+  font-weight: 650;
+}
+
 .export-menu-wrap {
   position: relative;
   align-self: flex-start;

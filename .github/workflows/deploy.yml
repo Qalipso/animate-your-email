@@ -1,0 +1,57 @@
+name: Deploy demo
+
+# The demo is the app itself: it runs entirely in the browser with no backend, no accounts
+# and no secrets, so a static Pages build is the whole deployment.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Never let two deploys race; let an in-flight one finish rather than shipping a half-upload.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: app
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+      - run: npm ci
+      # Gate the deploy on the same checks CI runs, so main can never publish a build that
+      # fails its own test suite.
+      - run: npm run lint
+      - run: npm run typecheck
+      - run: npm run test:unit
+      - name: Build
+        # Pages serves from /<repo>/, so assets need that prefix; see vite.config.ts.
+        run: npm run build
+        env:
+          DEPLOY_BASE: /${{ github.event.repository.name }}/
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: app/dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

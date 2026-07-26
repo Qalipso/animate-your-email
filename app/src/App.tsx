@@ -117,6 +117,27 @@ function prefersReducedMotion(): boolean {
   return typeof window !== 'undefined' && window.matchMedia?.('(prefers-reduced-motion: reduce)').matches === true
 }
 
+type ClipboardCapability = 'gif' | 'still-only' | 'none'
+
+/**
+ * What this browser will actually accept on the clipboard, resolved once up front so the
+ * buttons can be labelled for what they really do.
+ *
+ * The Async Clipboard API's image write is limited to a small allowlist, and `image/gif` is
+ * not on it in Chromium (verified: `ClipboardItem.supports('image/gif') === false`, Chrome
+ * 148). Offering a button called "Copy GIF" that quietly puts a *still* PNG on the clipboard
+ * is the single most misleading thing this app could do — a user pastes it into an email and
+ * finds out much later. So the capability decides which action is primary and what it is
+ * called, before the click rather than in a status message after it.
+ */
+function detectClipboardCapability(): ClipboardCapability {
+  if (typeof ClipboardItem === 'undefined' || !navigator.clipboard?.write) return 'none'
+  // No supports() to ask (older Safari): stay optimistic — the write path surfaces a real failure.
+  if (typeof ClipboardItem.supports !== 'function') return 'gif'
+  if (ClipboardItem.supports('image/gif')) return 'gif'
+  return ClipboardItem.supports('image/png') ? 'still-only' : 'none'
+}
+
 function App() {
   const [rawText, setRawText] = useState(SAMPLE_TEXT)
   const [modeOverride, setModeOverride] = useState<OutputMode | null>(null)
@@ -131,6 +152,7 @@ function App() {
   const [selection, setSelection] = useState<{ start: number; end: number } | null>(null)
   const [effectTarget, setEffectTarget] = useState<EffectTarget | null>(null)
   const [isLooping, setIsLooping] = useState(() => !prefersReducedMotion())
+  const [clipboard] = useState(detectClipboardCapability)
   const [replayNonce, setReplayNonce] = useState(0)
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null)
 
@@ -445,41 +467,20 @@ function App() {
     setVersion((v) => v + 1)
   }
 
-  /** Primary action: generate the GIF and copy it straight to the clipboard for pasting into an email. */
-  async function handleCopyGif() {
-    if (!doc || !scene) return
+  /** Copies the animated GIF. Only offered when the clipboard will actually accept image/gif. */
+  async function handleCopyAnimated() {
+    if (!doc) return
     setIsCopying(true)
     setExportProgress(0)
+    setStatus({ kind: 'info', text: 'Preparing GIF to copy…' })
     try {
-      if (typeof ClipboardItem === 'undefined' || !navigator.clipboard?.write) {
-        throw new Error('Copying images isn’t supported in this browser — use Save GIF instead.')
-      }
-      // Verified in-browser (Chromium): the Async Clipboard API's image write only
-      // accepts image/png and image/svg+xml — image/gif is rejected outright, so an
-      // animated GIF genuinely cannot be put on the clipboard from a web page today.
-      // Fall back to copying this scene's settled frame as a static PNG instead of
-      // just failing, and say so plainly rather than silently pasting something that
-      // quietly isn't animated.
-      const gifSupported = typeof ClipboardItem.supports !== 'function' || ClipboardItem.supports('image/gif')
-      if (gifSupported) {
-        setStatus({ kind: 'info', text: 'Preparing GIF to copy…' })
-        const gifPromise = exportDocumentAsGif(doc, undefined, setExportProgress)
-        // Passing a Promise (not an already-resolved Blob) keeps this write() call
-        // itself synchronous within the click handler, which Safari requires to honor
-        // the user gesture for clipboard permission — write() awaits it internally.
-        await navigator.clipboard.write([new ClipboardItem({ 'image/gif': gifPromise })])
-        const blob = await gifPromise
-        setStatus({ kind: 'success', text: `Copied — ${formatSize(blob.size)}. Paste it into your email.` })
-      } else {
-        setStatus({ kind: 'info', text: 'This browser can’t copy animated GIFs — copying a static image instead…' })
-        const pngPromise = exportSceneAsPng(doc, scene)
-        await navigator.clipboard.write([new ClipboardItem({ 'image/png': pngPromise })])
-        const blob = await pngPromise
-        setStatus({
-          kind: 'success',
-          text: `Copied a static image — ${formatSize(blob.size)}. This browser can’t copy animated GIFs to the clipboard; use Save GIF for the animated file.`,
-        })
-      }
+      const gifPromise = exportDocumentAsGif(doc, undefined, setExportProgress)
+      // Passing a Promise (not an already-resolved Blob) keeps this write() call
+      // itself synchronous within the click handler, which Safari requires to honor
+      // the user gesture for clipboard permission — write() awaits it internally.
+      await navigator.clipboard.write([new ClipboardItem({ 'image/gif': gifPromise })])
+      const blob = await gifPromise
+      setStatus({ kind: 'success', text: `Copied the animated GIF — ${formatSize(blob.size)}. Paste it into your email.` })
     } catch (err) {
       if (err instanceof ExportCancelledError) {
         setStatus({ kind: 'info', text: 'Export cancelled.' })
@@ -489,6 +490,26 @@ function App() {
     } finally {
       setIsCopying(false)
       setExportProgress(null)
+    }
+  }
+
+  /**
+   * Copies the settled frame as a PNG. Deliberately a separate, differently-labelled action
+   * from copying the GIF: this pastes a still, and the button has to say so before the click,
+   * not explain it afterwards.
+   */
+  async function handleCopyStill() {
+    if (!doc || !scene) return
+    setIsCopying(true)
+    try {
+      const pngPromise = exportSceneAsPng(doc, scene)
+      await navigator.clipboard.write([new ClipboardItem({ 'image/png': pngPromise })])
+      const blob = await pngPromise
+      setStatus({ kind: 'success', text: `Copied a still image — ${formatSize(blob.size)}. It will not be animated.` })
+    } catch (err) {
+      setStatus({ kind: 'error', text: `Copy failed: ${(err as Error).message}` })
+    } finally {
+      setIsCopying(false)
     }
   }
 
@@ -542,8 +563,8 @@ function App() {
       <header className="masthead">
         <h1>Animate your email</h1>
         <p className="tagline">
-          Paste your text, pick what should stand out, and copy an animated GIF straight into Gmail or Outlook.
-          Everything runs in this browser — nothing is uploaded.
+          Paste your text, pick what should stand out, and get an animated GIF for your email — however much
+          you paste, it fits in one frame. Everything runs in this browser; nothing is uploaded.
         </p>
       </header>
 
@@ -677,19 +698,43 @@ function App() {
                 </p>
               )}
 
+              {/* Which action leads depends on what the browser can really do, not on what
+                  reads best — see detectClipboardCapability. */}
               <div className="actions">
-                <button className="cta-primary" onClick={handleCopyGif} disabled={busy}>
-                  {isCopying ? 'Copying…' : 'Copy GIF'}
-                </button>
-                <button className="cta-secondary" onClick={handleSaveGif} disabled={busy}>
-                  {isExporting ? 'Saving…' : 'Save GIF'}
-                </button>
+                {clipboard === 'gif' ? (
+                  <>
+                    <button className="cta-primary" onClick={handleCopyAnimated} disabled={busy}>
+                      {isCopying ? 'Copying…' : 'Copy GIF'}
+                    </button>
+                    <button className="cta-secondary" onClick={handleSaveGif} disabled={busy}>
+                      {isExporting ? 'Saving…' : 'Save GIF'}
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    <button className="cta-primary" onClick={handleSaveGif} disabled={busy}>
+                      {isExporting ? 'Saving…' : 'Save GIF'}
+                    </button>
+                    {clipboard === 'still-only' && (
+                      <button className="cta-secondary" onClick={handleCopyStill} disabled={busy}>
+                        {isCopying ? 'Copying…' : 'Copy still image'}
+                      </button>
+                    )}
+                  </>
+                )}
                 {busy && (
                   <button className="ghost-button" onClick={cancelExport}>
                     Cancel
                   </button>
                 )}
               </div>
+
+              {clipboard !== 'gif' && (
+                <p className="disclosure">
+                  This browser can’t put an <strong>animated</strong> GIF on the clipboard — only still
+                  images. Save the GIF and attach or drag it into your email to keep the animation.
+                </p>
+              )}
 
               {busy && (
                 <div className="progress" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round((exportProgress ?? 0) * 100)}>

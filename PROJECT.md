@@ -12,7 +12,7 @@
 ## Stack
 V2: React + plain Canvas2D/OffscreenCanvas (no Fabric.js — removed) + `gifenc` in a Web
 Worker for GIF encode (2× supersampled, one shared palette, inter-frame differencing). Rendering is driven entirely by a JSON document model
-(`src/src/engine/model.ts`); the model, not any canvas library, is the source of truth.
+(`app/src/engine/model.ts`); the model, not any canvas library, is the source of truth.
 Rationale: `knowledge/decisions/DEC-009-v2-long-form-architecture.md`. V1's stack pick
 (Fabric+GSAP) is superseded, see `knowledge/decisions/DEC-003-stack-and-roadmap.md` for
 history.
