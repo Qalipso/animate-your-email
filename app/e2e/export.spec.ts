@@ -144,6 +144,67 @@ test('the hold slider lengthens the loop without changing the picture', async ({
   expect(worstRow).toBeLessThan(6)
 })
 
+test('the SVG export is real vector text and agrees with the raster render', async ({ page }) => {
+  await page.goto('/')
+  await expect(page.locator('.preview-frame canvas').first()).toBeVisible()
+
+  const svgBytes = await saveAndRead(page, () =>
+    page.getByRole('button', { name: /Save animated SVG/ }).click(),
+  )
+  const svg = svgBytes.toString('utf8')
+
+  expect(svg.startsWith('<svg xmlns="http://www.w3.org/2000/svg"')).toBe(true)
+  expect(svg).toContain('<text')
+  // A vector export whose glyphs are outlined paths would have thrown away the whole point.
+  expect(svg).toMatch(/<text[^>]*>[^<]+<\/text>/)
+
+  const png = await saveAndRead(page, () => page.getByRole('button', { name: /Save a still PNG/ }).click())
+
+  // Freeze the SVG at its settled state and compare it against the canvas still. This is the
+  // check that stops the two backends drifting: they share geometry, so they must agree.
+  const comparison = await page.evaluate(
+    async ({ svgText, pngData }) => {
+      const frozen = svgText.replace(/animation:[^;"]*/g, 'stroke-dashoffset:0')
+      const img = new Image()
+      img.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(frozen)
+      await img.decode()
+
+      const a = new OffscreenCanvas(img.width, img.height)
+      const actx = a.getContext('2d')!
+      actx.fillStyle = '#fff'
+      actx.fillRect(0, 0, a.width, a.height)
+      actx.drawImage(img, 0, 0)
+      const svgPx = actx.getImageData(0, 0, a.width, a.height).data
+
+      const bmp = await createImageBitmap(new Blob([new Uint8Array(pngData)], { type: 'image/png' }))
+      const b = new OffscreenCanvas(bmp.width, bmp.height)
+      const bctx = b.getContext('2d')!
+      bctx.drawImage(bmp, 0, 0)
+      const pngPx = bctx.getImageData(0, 0, b.width, b.height).data
+
+      if (svgPx.length !== pngPx.length) return { sameSize: false, differing: 1, ink: 0, total: 1 }
+      let differing = 0
+      let ink = 0
+      for (let i = 0; i < svgPx.length; i += 4) {
+        if (
+          Math.abs(svgPx[i] - pngPx[i]) > 60 ||
+          Math.abs(svgPx[i + 1] - pngPx[i + 1]) > 60 ||
+          Math.abs(svgPx[i + 2] - pngPx[i + 2]) > 60
+        ) {
+          differing++
+        }
+        if (svgPx[i] < 128) ink++
+      }
+      return { sameSize: true, differing, ink, total: svgPx.length / 4 }
+    },
+    { svgText: svg, pngData: [...png] },
+  )
+
+  expect(comparison.sameSize).toBe(true)
+  expect(comparison.ink / comparison.total).toBeGreaterThan(0.005) // it drew something
+  expect(comparison.differing / comparison.total).toBeLessThan(0.01)
+})
+
 test('the GIF’s settled frame matches the still PNG export', async ({ page }) => {
   await page.goto('/')
   await expect(page.locator('.preview-frame canvas').first()).toBeVisible()

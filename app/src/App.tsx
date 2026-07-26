@@ -7,6 +7,7 @@ import {
   toggleRunAnimation,
 } from './engine/document'
 import { cancelExport, exportDocumentAsGif, exportSceneAsPng, ExportCancelledError } from './engine/exportV2'
+import { exportSceneAsSvg } from './engine/svgExport'
 import { MODE_PRESETS, autoSelectMode } from './engine/modeSelect'
 import { contentOffsetY, renderScene, sceneTimingFor } from './engine/render'
 import { PADDING } from './engine/layout'
@@ -579,6 +580,27 @@ function App() {
     }
   }
 
+  /**
+   * Vector export. Kept visibly apart from the email actions: mail clients strip SVG, so
+   * offering it beside "Save GIF" as an equal option would be telling the user something
+   * false about where they can use it.
+   */
+  async function handleExportSvg() {
+    if (!doc || !scene) return
+    const { svg, staticPresets } = await exportSceneAsSvg(doc, scene)
+    const blob = new Blob([svg], { type: 'image/svg+xml' })
+    triggerDownload(blob, 'animation.svg')
+    const names = staticPresets
+      .map((id) => EMPHASIS_OPTIONS.find((o) => o.id === id)?.name ?? id)
+      .join(', ')
+    setStatus({
+      kind: 'success',
+      text: staticPresets.length
+        ? `Saved SVG — ${formatSize(blob.size)}. For the web, not email. ${names} ${staticPresets.length > 1 ? 'are' : 'is'} drawn at rest — only drawn-stroke effects animate in SVG.`
+        : `Saved SVG — ${formatSize(blob.size)}. For the web, not email — mail clients strip SVG.`,
+    })
+  }
+
   async function handleExportPng() {
     if (!doc || !scene) return
     const blob = await exportSceneAsPng(doc, scene)
@@ -829,7 +851,10 @@ function App() {
 
               <div className="export-menu-wrap">
                 <button className="ghost-button" onClick={handleExportPng} disabled={busy}>
-                  Save a still PNG instead
+                  Save a still PNG
+                </button>
+                <button className="ghost-button" onClick={handleExportSvg} disabled={busy}>
+                  Save animated SVG (for the web, not email)
                 </button>
               </div>
             </>

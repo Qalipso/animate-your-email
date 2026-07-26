@@ -13,6 +13,28 @@ class MockGradient {
   addColorStop() {}
 }
 
+/**
+ * Stand-in for Path2D. The renderer now hands geometry to the canvas as SVG path data (the
+ * same strings the SVG exporter emits), so the mock has to understand `d` well enough for
+ * tests to assert on what was drawn — the coordinates are all that matters here.
+ */
+export class MockPath2D {
+  readonly d: string
+  readonly points: { x: number; y: number }[]
+
+  constructor(d = '') {
+    this.d = d
+    const nums = (d.match(/-?\d+(?:\.\d+)?/g) ?? []).map(Number)
+    this.points = []
+    // Commands used by the sketch primitives are M/L (one point) and Q (control + end);
+    // taking every coordinate pair covers both, and control points sit within the stroke's
+    // own extent so they don't distort the measured span.
+    for (let i = 0; i + 1 < nums.length; i += 2) {
+      this.points.push({ x: nums[i], y: nums[i + 1] })
+    }
+  }
+}
+
 /** A fillRect the renderer issued, so tests can assert on painted geometry, not just that nothing threw. */
 export interface RecordedRect {
   x: number
@@ -91,11 +113,12 @@ export class MockCanvasContext {
   }
   ellipse() {}
   arc() {}
-  stroke() {
-    if (this.path.length === 0) return
-    const xs = this.path.map((p) => p.x)
-    const first = this.path[0]
-    const last = this.path[this.path.length - 1]
+  stroke(path?: MockPath2D) {
+    const pts = path ? path.points : this.path
+    if (pts.length === 0) return
+    const xs = pts.map((p) => p.x)
+    const first = pts[0]
+    const last = pts[pts.length - 1]
     this.strokes.push({
       x0: first.x,
       y0: first.y,
@@ -145,4 +168,5 @@ export class MockCanvas {
 
 export function installCanvasPolyfill() {
   ;(globalThis as any).OffscreenCanvas = MockCanvas
+  ;(globalThis as any).Path2D = MockPath2D
 }
