@@ -191,6 +191,60 @@ test('Suggest effects matches each phrase and says why', async ({ page }) => {
   await expect.poll(() => inkFraction(page), { timeout: 8000 }).not.toBe(before)
 })
 
+test('a long paste is never destroyed, only partly used', async ({ page }) => {
+  await page.goto('/')
+  const long = 'word '.repeat(500) // ~2500 characters, well over the 1500 cap
+  await page.locator('#source-text').fill(long)
+
+  // The tail must still be in the box — truncating on input lost it unrecoverably.
+  const kept = await page.locator('#source-text').inputValue()
+  expect(kept.length).toBe(long.length)
+
+  // And the user has to be told what is not in the image.
+  await expect(page.locator('.status-error')).toContainText(/are not/)
+})
+
+test('the draft survives a reload', async ({ page }) => {
+  await page.goto('/')
+  const mine = 'A message I would hate to lose after a refresh.'
+  await page.locator('#source-text').fill(mine)
+  await page.waitForTimeout(700) // debounced write
+
+  await page.reload()
+  await expect(page.locator('#source-text')).toHaveValue(mine)
+})
+
+test('the canvas is fully operable from the keyboard', async ({ page }) => {
+  await page.goto('/')
+  const canvas = page.locator('.preview-frame canvas').first()
+  await expect(canvas).toBeVisible()
+
+  await canvas.focus()
+  const live = page.locator('[aria-live="polite"]')
+  // Focusing lands on the first word and says so.
+  await expect(live).toContainText(/word 1 of \d+/)
+
+  await page.keyboard.press('ArrowRight')
+  await expect(live).toContainText(/word 2 of \d+/)
+
+  // Enter toggles the focused word, and the announcement reports the new state.
+  const before = (await live.textContent()) ?? ''
+  const wasAnimated = /(?<!not )animated/.test(before)
+  await page.keyboard.press('Enter')
+  await expect
+    .poll(async () => /(?<!not )animated/.test((await live.textContent()) ?? ''))
+    .toBe(!wasAnimated)
+
+  // Shift+Arrow selects a phrase, E opens the effect list for it — the mouse's two other moves.
+  await page.keyboard.press('Shift+ArrowRight')
+  await page.keyboard.press('Shift+ArrowRight')
+  await page.keyboard.press('e')
+  await expect(page.locator('.effect-bar')).toBeVisible()
+
+  await page.keyboard.press('Escape')
+  await expect(page.locator('.effect-bar')).toBeHidden()
+})
+
 test('the export UI promises only what this browser can actually do', async ({ page }) => {
   await page.goto('/')
   const capability = await page.evaluate(() => {

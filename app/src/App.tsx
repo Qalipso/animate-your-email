@@ -23,6 +23,7 @@ import {
   MIN_SPEED,
 } from './engine/model'
 import { EffectPreview } from './EffectPreview'
+import { clearDraft, loadDraft, saveDraft } from './session'
 import './App.css'
 
 const GENERATE_DEBOUNCE_MS = 400
@@ -178,8 +179,11 @@ function detectClipboardCapability(): ClipboardCapability {
 }
 
 function App() {
-  const [rawText, setRawText] = useState(SAMPLE_TEXT)
-  const [modeOverride, setModeOverride] = useState<OutputMode | null>(null)
+  // Read once, synchronously, so the first render is already the restored draft — restoring in
+  // an effect would flash the sample text first.
+  const [restored] = useState(loadDraft)
+  const [rawText, setRawText] = useState(() => restored?.text ?? SAMPLE_TEXT)
+  const [modeOverride, setModeOverride] = useState<OutputMode | null>(() => restored?.mode ?? null)
   const [doc, setDoc] = useState<AnimatedDocument | null>(null)
   const [version, setVersion] = useState(0)
   const [status, setStatus] = useState<Status | null>(null)
@@ -192,11 +196,14 @@ function App() {
   const [effectTarget, setEffectTarget] = useState<EffectTarget | null>(null)
   const [isLooping, setIsLooping] = useState(() => !prefersReducedMotion())
   const [clipboard] = useState(detectClipboardCapability)
-  const [speed, setSpeed] = useState(DEFAULT_SPEED)
-  const [holdMs, setHoldMs] = useState(DEFAULT_HOLD_MS)
+  const [speed, setSpeed] = useState(() => restored?.speed ?? DEFAULT_SPEED)
+  const [holdMs, setHoldMs] = useState(() => restored?.holdMs ?? DEFAULT_HOLD_MS)
   const [replayNonce, setReplayNonce] = useState(0)
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null)
   const [hoveredEffect, setHoveredEffect] = useState<{ id: EmphasisPresetId; top: number; left: number } | null>(null)
+  /** Word the keyboard is on. The canvas is the main editing surface; it cannot be mouse-only. */
+  const [caret, setCaret] = useState<number | null>(null)
+  const [announcement, setAnnouncement] = useState('')
 
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
   const overlayCanvasRef = useRef<HTMLCanvasElement | null>(null)
@@ -237,6 +244,16 @@ function App() {
     setContextMenu(null)
     setHoveredEffect(null)
   }, [updateSelection])
+
+  // Keep the draft. Debounced on the same beat as the rebuild, so typing costs one write per
+  // pause rather than one per keystroke.
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      if (rawText.trim()) saveDraft({ text: rawText, mode: modeOverride, speed, holdMs })
+      else clearDraft()
+    }, GENERATE_DEBOUNCE_MS)
+    return () => clearTimeout(timer)
+  }, [rawText, modeOverride, speed, holdMs])
 
   // Auto-generate the preview whenever the text or template settings change — no
   // separate "Generate" step. Debounced so it doesn't rebuild on every keystroke.
@@ -352,8 +369,23 @@ function App() {
     const ctx = prepareCanvas(canvas, doc.width, doc.height, dpr)
     if (!ctx) return
     ctx.clearRect(0, 0, doc.width, doc.height)
-    if (!selection || !layout) return
+    if (!layout) return
     const flat = layout.lines.flatMap((l) => l.words)
+    const offsetYAll = contentOffsetY(doc, layout)
+
+    // Keyboard caret: a visible ring, because "focused" has to be visible to the sighted
+    // keyboard user as well as announced to the screen reader.
+    if (caret !== null && flat[caret]) {
+      const w = flat[caret]
+      ctx.save()
+      ctx.strokeStyle = 'rgba(43, 108, 255, 0.95)'
+      ctx.lineWidth = 2
+      ctx.setLineDash([4, 3])
+      ctx.strokeRect(PADDING + w.x - 3, offsetYAll + w.y - 1, w.width + 6, w.height + 2)
+      ctx.restore()
+    }
+
+    if (!selection) return
     const lo = Math.min(selection.start, selection.end)
     const hi = Math.max(selection.start, selection.end)
     if (lo === hi) return
@@ -364,7 +396,7 @@ function App() {
       if (!w) continue
       ctx.fillRect(PADDING + w.x - 2, offsetY + w.y, w.width + 4, w.height)
     }
-  }, [selection, layout, doc, prepareCanvas])
+  }, [selection, layout, doc, prepareCanvas, caret])
 
   // Dismiss the context menu on an outside click or Escape.
   useEffect(() => {
@@ -504,6 +536,131 @@ function App() {
     if (!target) return
     setEffectTarget(target)
     setContextMenu({ x: e.clientX, y: e.clientY })
+  }
+
+  /** Flat word list in reading order — the order the keyboard walks. */
+  const flatWords = useMemo(
+    () => layout?.lines.flatMap((l) => l.words) ?? [],
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [layout, version],
+  )
+
+  function describe(index: number): string {
+    const word = flatWords[index]
+    if (!word) return ''
+    const state = word.highlight?.animated ? 'animated' : 'not animated'
+    return `${word.text}, ${state}, word ${index + 1} of ${flatWords.length}`
+  }
+
+  function moveCaret(next: number, extend: boolean) {
+    const clamped = Math.max(0, Math.min(flatWords.length - 1, next))
+    setCaret(clamped)
+    if (extend) {
+      const anchor = anchorIndexRef.current ?? clamped
+      anchorIndexRef.current = anchor
+      updateSelection({ start: anchor, end: clamped })
+    } else {
+      anchorIndexRef.current = clamped
+      updateSelection(null)
+      setEffectTarget(null)
+    }
+    setAnnouncement(describe(clamped))
+  }
+
+  /** Index of the word nearest the same x on the line `delta` away — arrow Up/Down. */
+  function verticalNeighbour(index: number, delta: number): number {
+    if (!layout) return index
+    let lineIndex = 0
+    let seen = 0
+    for (let i = 0; i < layout.lines.length; i++) {
+      const count = layout.lines[i].words.length
+      if (index < seen + count) {
+        lineIndex = i
+        break
+      }
+      seen += count
+    }
+    const target = layout.lines[lineIndex + delta]
+    if (!target) return index
+    const current = flatWords[index]
+    let base = 0
+    for (let i = 0; i < lineIndex + delta; i++) base += layout.lines[i].words.length
+    let best = 0
+    let bestDist = Infinity
+    target.words.forEach((w, i) => {
+      const dist = Math.abs(w.x - current.x)
+      if (dist < bestDist) {
+        bestDist = dist
+        best = i
+      }
+    })
+    return base + best
+  }
+
+  /**
+   * Full keyboard control of the canvas. Arrow keys walk the words, Shift extends a selection,
+   * Enter toggles, and E opens the effect picker for whatever is selected — the same three
+   * things the mouse can do, which is the point.
+   */
+  function handleCanvasKeyDown(e: React.KeyboardEvent<HTMLCanvasElement>) {
+    if (!doc || !layout || flatWords.length === 0) return
+    const current = caret ?? 0
+    const extend = e.shiftKey
+
+    switch (e.key) {
+      case 'ArrowRight':
+        e.preventDefault()
+        moveCaret(current + 1, extend)
+        return
+      case 'ArrowLeft':
+        e.preventDefault()
+        moveCaret(current - 1, extend)
+        return
+      case 'ArrowDown':
+        e.preventDefault()
+        moveCaret(verticalNeighbour(current, 1), extend)
+        return
+      case 'ArrowUp':
+        e.preventDefault()
+        moveCaret(verticalNeighbour(current, -1), extend)
+        return
+      case 'Home':
+        e.preventDefault()
+        moveCaret(0, extend)
+        return
+      case 'End':
+        e.preventDefault()
+        moveCaret(flatWords.length - 1, extend)
+        return
+      case 'Enter':
+      case ' ': {
+        e.preventDefault()
+        const word = flatWords[current]
+        if (!word) return
+        const nowOn = toggleRunAnimation(doc, word.runId)
+        setVersion((v) => v + 1)
+        setAnnouncement(`${word.text}, ${nowOn ? 'animated' : 'not animated'}`)
+        return
+      }
+      case 'e':
+      case 'E': {
+        e.preventDefault()
+        const sel = selectionRef.current
+        const lo = sel ? Math.min(sel.start, sel.end) : current
+        const hi = sel ? Math.max(sel.start, sel.end) : current
+        const target = buildEffectTarget(lo, hi)
+        if (target) {
+          setEffectTarget(target)
+          setAnnouncement(`Effect list open for ${target.label}`)
+        }
+        return
+      }
+      case 'Escape':
+        clearTargeting()
+        setAnnouncement('Selection cleared')
+        return
+      default:
+    }
   }
 
   function handleChooseEmphasis(preset: EmphasisPresetId) {
@@ -672,6 +829,7 @@ function App() {
   }, [scene, version])
 
   const busy = isCopying || isExporting
+  const overflowChars = Math.max(0, rawText.length - MAX_CHARACTERS)
   const nearCharLimit = rawText.length > MAX_CHARACTERS * 0.9
   // Shown next to the sliders so the tempo choice is tied to the number that actually
   // matters: how long the exported loop will be.
@@ -735,13 +893,24 @@ function App() {
               id="source-text"
               className="text-area"
               value={rawText}
-              onChange={(e) => setRawText(e.target.value.slice(0, MAX_CHARACTERS))}
+              // Deliberately NOT sliced here. Truncating on input destroyed the tail of a long
+              // paste instantly and unrecoverably — the user could not even scroll back to see
+              // what they had lost. The builder takes only the first MAX_CHARACTERS; the rest
+              // stays in the box, and the counter below says exactly how much won't be included.
+              onChange={(e) => setRawText(e.target.value)}
               placeholder="Paste your email or message…"
               rows={8}
             />
+            {overflowChars > 0 && (
+              <p className="status status-error" role="alert">
+                Only the first {MAX_CHARACTERS} characters are in the image — {overflowChars} are not.
+                Your full text is still here; shorten it to include everything.
+              </p>
+            )}
             <div className="field-footer">
               <span className="field-hint">
                 Wrap a phrase in <code>*stars*</code> or <code>[[brackets]]</code> to force emphasis.
+                {restored ? ' Your last draft was restored.' : ''}
               </span>
               <span className={nearCharLimit ? 'char-count char-count-warn' : 'char-count'}>
                 {rawText.length} / {MAX_CHARACTERS}
@@ -806,11 +975,18 @@ function App() {
               >
                 <canvas
                   ref={canvasRef}
+                  tabIndex={0}
+                  role="application"
                   onMouseDown={handleMouseDown}
                   onMouseMove={handleMouseMove}
                   onMouseUp={handleMouseUp}
                   onContextMenu={handleContextMenu}
-                  aria-label="Animation preview — click a word to toggle its emphasis"
+                  onKeyDown={handleCanvasKeyDown}
+                  onFocus={() => {
+                    if (caret === null && flatWords.length > 0) moveCaret(0, false)
+                  }}
+                  onBlur={() => setCaret(null)}
+                  aria-label="Animation preview. Arrow keys move between words, Enter toggles a word, Shift and arrows select a phrase, E opens the effect list."
                 />
                 <canvas ref={overlayCanvasRef} className="selection-overlay" aria-hidden="true" />
               </div>
@@ -894,7 +1070,8 @@ function App() {
               ) : (
                 <p className="hint">
                   <strong>Click</strong> a word to animate or un-animate it. <strong>Drag</strong> across a phrase to
-                  pick an effect for it.
+                  pick an effect for it. With a keyboard: <kbd>Tab</kbd> to the preview, then arrows,{' '}
+                  <kbd>Enter</kbd>, and <kbd>E</kbd>.
                 </p>
               )}
 
@@ -965,6 +1142,10 @@ function App() {
           )}
         </section>
       </div>
+
+      <p className="visually-hidden" role="status" aria-live="polite">
+        {announcement}
+      </p>
 
       {hoveredEffect && (
         <div

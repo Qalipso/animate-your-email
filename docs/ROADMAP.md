@@ -31,7 +31,7 @@ it historically shows only the first frame.
 
 Until that exists, the README must not claim compatibility it has not measured.
 
-### 2. Accessibility
+### 2. Accessibility — largest gap closed in [DEC-015], audit still outstanding
 
 Partially addressed (focus-visible treatment, `prefers-reduced-motion` for the preview loop,
 `aria-pressed`/`aria-label` on controls, a progress bar with proper roles) but **not audited**
@@ -44,9 +44,9 @@ against WCAG 2.2 AA. Known gaps:
 - No screen-reader account of what the animation does; the preview is an opaque canvas.
 - Colour contrast of the effect swatches and muted text is unverified.
 
-### 3. Protection against losing typed text
+### 3. Protection against losing typed text — done in [DEC-015]
 
-There is none. A refresh, a crash, or a closed tab loses the message, and the 1500-character
+~~There is none.~~ A refresh, a crash, or a closed tab loses the message, and the 1500-character
 cap silently truncates a longer paste (the counter turns red, but the tail is already gone).
 
 Needs: debounced `localStorage` persistence with explicit restore, a non-destructive
@@ -73,5 +73,6 @@ a graceful (stated, not silent) failure where a browser cannot encode at all.
 
 ---
 
+[DEC-015]: ../knowledge/decisions/DEC-015-keyboard-access-and-drafts.md
 [DEC-002]: ../knowledge/decisions/DEC-002-investigation-findings.md
 [DEC-004]: ../knowledge/decisions/DEC-004-clipboard-gate-results.md

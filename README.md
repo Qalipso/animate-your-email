@@ -24,6 +24,11 @@ underline, circle, box, brackets, strike-through — in the vocabulary
 survives into the GIF. Two sliders set the tempo: **Speed** (0.5×–2×) and **Hold at end**,
 with the resulting loop length shown next to them.
 
+The preview is fully keyboard-operable — <kbd>Tab</kbd> to it, then arrows to walk the words,
+<kbd>Enter</kbd> to toggle one, <kbd>Shift</kbd>+arrows to select a phrase and <kbd>E</kbd> to
+open the effect list — with a visible caret and a live region for screen readers. Your draft is
+kept locally across reloads, and a paste longer than the limit is never truncated in the box.
+
 **Suggest effects** dresses the whole message in one click by matching each phrase to what it
 is: a negation gets struck through, a quotation bracketed, a figure circled, a call to action
 highlighted — and it tells you why it chose each one. It is rules over the detector's own
@@ -92,7 +97,7 @@ cd app && npm install && npm run dev
 | `npm run lint` | oxlint |
 | `npm run typecheck` | `tsc -b` |
 | `npm run test:unit` | 63 Vitest tests — layout, fitting, spacing, annotation geometry, tempo, SVG, GIF timing |
-| `npm run test:e2e` | 14 Playwright tests against the production build |
+| `npm run test:e2e` | 17 Playwright tests against the production build |
 | `npm run samples` | regenerates `samples/` from the real app |
 
 CI runs lint, types, unit tests and the browser suite on every push
