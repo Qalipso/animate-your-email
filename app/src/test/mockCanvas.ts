@@ -22,12 +22,25 @@ export interface RecordedRect {
   fillStyle: string
 }
 
+/** A stroked path, reduced to its extent — enough to assert what a hand-drawn annotation covered. */
+export interface RecordedStroke {
+  x0: number
+  y0: number
+  x1: number
+  y1: number
+  minX: number
+  maxX: number
+  strokeStyle: string
+  lineWidth: number
+}
+
 export class MockCanvasContext {
   font = '16px sans-serif'
   fillStyle = '#000'
   strokeStyle = '#000'
   lineWidth = 1
   lineCap = 'butt'
+  lineJoin = 'miter'
   globalAlpha = 1
   globalCompositeOperation = 'source-over'
   filter = 'none'
@@ -38,6 +51,8 @@ export class MockCanvasContext {
   imageSmoothingQuality = 'low'
   canvas: MockCanvas
   readonly rects: RecordedRect[] = []
+  readonly strokes: RecordedStroke[] = []
+  private path: { x: number; y: number }[] = []
 
   constructor(canvas: MockCanvas) {
     this.canvas = canvas
@@ -58,12 +73,40 @@ export class MockCanvasContext {
   strokeRect() {}
   fillText() {}
   strokeText() {}
-  beginPath() {}
+  beginPath() {
+    this.path = []
+  }
   closePath() {}
-  moveTo() {}
-  lineTo() {}
+  moveTo(x: number, y: number) {
+    this.path.push({ x, y })
+  }
+  lineTo(x: number, y: number) {
+    this.path.push({ x, y })
+  }
+  quadraticCurveTo(_cx: number, _cy: number, x: number, y: number) {
+    this.path.push({ x, y })
+  }
+  bezierCurveTo(_a: number, _b: number, _c: number, _d: number, x: number, y: number) {
+    this.path.push({ x, y })
+  }
+  ellipse() {}
   arc() {}
-  stroke() {}
+  stroke() {
+    if (this.path.length === 0) return
+    const xs = this.path.map((p) => p.x)
+    const first = this.path[0]
+    const last = this.path[this.path.length - 1]
+    this.strokes.push({
+      x0: first.x,
+      y0: first.y,
+      x1: last.x,
+      y1: last.y,
+      minX: Math.min(...xs),
+      maxX: Math.max(...xs),
+      strokeStyle: String(this.strokeStyle),
+      lineWidth: this.lineWidth,
+    })
+  }
   fill() {}
   save() {}
   restore() {}

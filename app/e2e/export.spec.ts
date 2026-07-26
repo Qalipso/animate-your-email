@@ -99,6 +99,51 @@ test('the text is fully readable in the very first frame, not revealed over time
   expect(first.height).toBe(last.height)
 })
 
+test('the speed slider changes the exported file, not just the preview', async ({ page }) => {
+  await page.goto('/')
+  await expect(page.locator('.preview-frame canvas').first()).toBeVisible()
+
+  const slider = page.getByRole('slider', { name: /Speed/ })
+
+  await slider.fill('1')
+  const atNormal = await saveAndRead(page, () => page.getByRole('button', { name: /Save GIF/ }).click())
+  const normal = await decodeInPage(page, atNormal, 'image/gif', [0])
+
+  await slider.fill('2')
+  const atDouble = await saveAndRead(page, () => page.getByRole('button', { name: /Save GIF/ }).click())
+  const double = await decodeInPage(page, atDouble, 'image/gif', [0])
+
+  // Twice the tempo, half the frames — the control has to reach the export worker, not stop
+  // at the preview canvas. Allowing ±2 frames for rounding to whole 50ms delays.
+  expect(double.frameCount).toBeLessThan(normal.frameCount)
+  expect(Math.abs(double.frameCount - normal.frameCount / 2)).toBeLessThanOrEqual(2)
+})
+
+test('the hold slider lengthens the loop without changing the picture', async ({ page }) => {
+  await page.goto('/')
+  await expect(page.locator('.preview-frame canvas').first()).toBeVisible()
+
+  const hold = page.getByRole('slider', { name: /Hold at end/ })
+
+  await hold.fill('0')
+  const tight = await saveAndRead(page, () => page.getByRole('button', { name: /Save GIF/ }).click())
+  const tightDecoded = await decodeInPage(page, tight, 'image/gif', 'all')
+
+  await hold.fill('2000')
+  const held = await saveAndRead(page, () => page.getByRole('button', { name: /Save GIF/ }).click())
+  const heldDecoded = await decodeInPage(page, held, 'image/gif', 'all')
+
+  // 2000ms at 50ms per frame is 40 extra frames of the same settled image.
+  const extra = heldDecoded.frameCount - tightDecoded.frameCount
+  expect(Math.abs(extra - 40)).toBeLessThanOrEqual(2)
+
+  const tightLast = tightDecoded.frames[tightDecoded.frames.length - 1]
+  const heldLast = heldDecoded.frames[heldDecoded.frames.length - 1]
+  expect(heldLast.digest.length).toBe(tightLast.digest.length)
+  const worstRow = Math.max(...heldLast.digest.map((v, i) => Math.abs(v - tightLast.digest[i])))
+  expect(worstRow).toBeLessThan(6)
+})
+
 test('the GIF’s settled frame matches the still PNG export', async ({ page }) => {
   await page.goto('/')
   await expect(page.locator('.preview-frame canvas').first()).toBeVisible()

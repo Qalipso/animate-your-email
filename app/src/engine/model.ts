@@ -30,6 +30,13 @@ export type EmphasisPresetId =
   | 'wash-away'
   | 'bow-highlight'
   | 'glitch'
+  // Hand-drawn annotation family — the vocabulary Rough Notation popularised. Each is drawn
+  // around or through the phrase over time, so the text underneath stays fully readable from
+  // frame one, which is the one rule no preset may break.
+  | 'circle-annotation'
+  | 'box-annotation'
+  | 'strike-through'
+  | 'bracket'
 // Kept on Scene for document-model stability, but no longer affects rendering — the base
 // text layer is always fully visible from frame 1 regardless of this value (render.ts's
 // ALWAYS_VISIBLE). Not exposed as a UI choice anymore since every option would now look
@@ -81,11 +88,20 @@ export interface AnimatedDocument {
   mode: OutputMode
   modeIsOverridden: boolean
   scenes: Scene[]
-  /** True if the input needed more than MAX_SCENES scenes and was truncated. */
+  /** True if the text could not fit even at MIN_READABLE_FONT_PX and its tail was cut. */
   truncated: boolean
   fontSize: number
   width: number
   height: number
+  /**
+   * Playback tempo. 1 is the designed pace; 2 plays twice as fast. Lives on the document
+   * rather than in component state because the export worker only ever receives the
+   * document — anything the preview honours but the export doesn't is a bug waiting to
+   * happen (see DEC-009 on the single rendering codepath).
+   */
+  speed: number
+  /** How long the finished frame is held before the GIF loops, in ms at speed 1. */
+  holdMs: number
 }
 
 // ---- Computed layout (never authored, always derived from a Scene + canvas metrics) ----
@@ -128,3 +144,12 @@ export const MAX_FRAME_HEIGHT = 1000
 export const MAX_ANIMATED_FRACTION = 0.15
 export const MAX_ANIMATED_PHRASES_PER_SCENE = 5
 export const MIN_READABLE_FONT_PX = 16
+
+/** Tempo bounds for the speed control. Below 0.5 the GIF gets email-hostile; above 2 the effects stop reading. */
+export const MIN_SPEED = 0.5
+export const MAX_SPEED = 2
+export const DEFAULT_SPEED = 1
+/** Hold-at-the-end bounds, in ms. Zero is allowed: some senders want a tight loop. */
+export const MIN_HOLD_MS = 0
+export const MAX_HOLD_MS = 2500
+export const DEFAULT_HOLD_MS = 800

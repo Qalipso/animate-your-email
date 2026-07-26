@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { buildAnimatedDocument, layoutSceneForRender } from './engine/document'
-import { computeSceneTiming, renderScene } from './engine/render'
+import { renderScene, sceneTimingFor } from './engine/render'
 import { buildTimeline, renderTimelineFrame, type Timeline } from './engine/timeline'
 import { exportDocumentAsGif } from './engine/exportV2'
 import { GIF_FPS } from './engine/quality'
@@ -29,6 +29,10 @@ const EMPHASIS_PRESETS: PresetDef[] = [
   { role: 'emphasis', id: 'wash-away', name: 'Wash Away' },
   { role: 'emphasis', id: 'bow-highlight', name: 'Pink Highlight + Bow' },
   { role: 'emphasis', id: 'glitch', name: 'Glitch' },
+  { role: 'emphasis', id: 'circle-annotation', name: 'Circle It' },
+  { role: 'emphasis', id: 'box-annotation', name: 'Box It' },
+  { role: 'emphasis', id: 'bracket', name: 'Brackets' },
+  { role: 'emphasis', id: 'strike-through', name: 'Strike Through' },
 ]
 const TRANSITION_PRESETS: PresetDef[] = [
   { role: 'transition', id: 'crossfade', name: 'Crossfade' },
@@ -133,7 +137,7 @@ async function runCell(preset: PresetDef, sample: Sample): Promise<CellResult> {
       doc = await buildEmphasisDoc(sample, preset.id)
       const scene = doc.scenes[0]
       const layout = await layoutSceneForRender(doc, scene)
-      const timing = computeSceneTiming(layout)
+      const timing = sceneTimingFor(doc, layout)
       totalMs = timing.totalMs
       firstFrame = await frameToDataUrl(doc.width, doc.height, (ctx) => renderScene(ctx, doc, layout, 0, timing))
       midFrame = await frameToDataUrl(doc.width, doc.height, (ctx) => renderScene(ctx, doc, layout, totalMs / 2, timing))
