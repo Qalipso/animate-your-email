@@ -1,4 +1,5 @@
 import { easeOutBack, easeOutCubic } from './easing'
+import { materialFor, paintAxis, type Paint, type PaintBox } from './materials'
 import { seededRandom, sketchEllipse, sketchLine, sketchRect } from './sketch'
 import { FONT_FAMILY, PADDING, type Ctx2D } from './layout'
 import { DEFAULT_HOLD_MS } from './model'
@@ -164,6 +165,28 @@ function phraseProgress(phrase: Phrase, tMs: number, timing: SceneTiming): numbe
   return clamp01((tMs - start) / timing.phraseDurationMs)
 }
 
+/**
+ * The box a phrase's material is painted over — the union of its segments, so a phrase that
+ * wraps still gets one continuous ink gradient rather than restarting on the second line.
+ * Computed identically by the SVG exporter; if the two ever diverge, the SVG-versus-raster
+ * agreement test fails, which is the point.
+ */
+export function phrasePaintBox(phrase: Phrase, ox: number, oy: number, fontSize: number): PaintBox {
+  const x0 = ox + Math.min(...phrase.segments.map((s) => s.x0))
+  const x1 = ox + Math.max(...phrase.segments.map((s) => s.x1))
+  const y0 = oy + phrase.segments[0].y
+  return { x0, y0, x1, y1: y0 + fontSize }
+}
+
+/** Resolves a backend-neutral material into something canvas can stroke with. */
+function resolvePaint(ctx: Ctx2D, paint: Paint, box: PaintBox): string | CanvasGradient {
+  if (paint.kind === 'solid') return paint.colour
+  const a = paintAxis(paint, box)
+  const gradient = ctx.createLinearGradient(a.x1, a.y1, a.x2, a.y2)
+  for (const stop of paint.stops) gradient.addColorStop(stop.at, stop.colour)
+  return gradient
+}
+
 /** Calls `draw` for the portion of each segment covered by a left-to-right sweep at `progress`. */
 export function forEachSweptSegment(
   phrase: Phrase,
@@ -210,11 +233,15 @@ function drawMarkerStroke(
   oy: number,
   eased: number,
   fontSize: number,
-  colour: string,
+  fallbackColour: string,
 ) {
   const rand = seededRandom(`${phrase.runId}:marker`)
   ctx.save()
-  ctx.strokeStyle = colour
+  ctx.strokeStyle = resolvePaint(
+    ctx,
+    materialFor(phrase.preset, fallbackColour),
+    phrasePaintBox(phrase, ox, oy, fontSize),
+  )
   ctx.lineCap = 'round'
   ctx.lineJoin = 'round'
   ctx.lineWidth = fontSize * 0.82
@@ -400,10 +427,12 @@ function drawPhraseOverlay(ctx: Ctx2D, phrase: Phrase, ox: number, oy: number, p
   const rand = seededRandom(`${phrase.runId}:${preset}`)
   const stroke = Math.max(2, fontSize * 0.055)
   const roughness = fontSize * 0.05
+  const box = phrasePaintBox(phrase, ox, oy, fontSize)
+  const ink = (fallback: string) => resolvePaint(ctx, materialFor(preset, fallback), box)
 
   if (preset === 'underline-draw') {
     // Two passes that don't quite agree, the way an underline drawn by hand doubles back.
-    ctx.strokeStyle = INK_BLUE
+    ctx.strokeStyle = ink(INK_BLUE)
     ctx.lineWidth = stroke
     ctx.lineCap = 'round'
     forEachSweptSegment(phrase, eased, (seg, sweptTo) => {
@@ -413,7 +442,7 @@ function drawPhraseOverlay(ctx: Ctx2D, phrase: Phrase, ox: number, oy: number, p
   }
 
   if (preset === 'strike-through') {
-    ctx.strokeStyle = INK_RED
+    ctx.strokeStyle = ink(INK_RED)
     ctx.lineWidth = stroke
     ctx.lineCap = 'round'
     forEachSweptSegment(phrase, eased, (seg, sweptTo) => {
@@ -425,7 +454,7 @@ function drawPhraseOverlay(ctx: Ctx2D, phrase: Phrase, ox: number, oy: number, p
   if (preset === 'circle-annotation') {
     // One loop per line the phrase occupies; a single ellipse round a phrase that wrapped
     // would swallow the lines in between.
-    ctx.strokeStyle = INK_RED
+    ctx.strokeStyle = ink(INK_RED)
     ctx.lineWidth = stroke
     ctx.lineCap = 'round'
     for (const seg of phrase.segments) {
@@ -440,7 +469,7 @@ function drawPhraseOverlay(ctx: Ctx2D, phrase: Phrase, ox: number, oy: number, p
   }
 
   if (preset === 'box-annotation') {
-    ctx.strokeStyle = INK_BLUE
+    ctx.strokeStyle = ink(INK_BLUE)
     ctx.lineWidth = stroke
     ctx.lineCap = 'round'
     for (const seg of phrase.segments) {
@@ -464,7 +493,7 @@ function drawPhraseOverlay(ctx: Ctx2D, phrase: Phrase, ox: number, oy: number, p
   if (preset === 'bracket') {
     // Both brackets grow from the middle of their own stroke outwards, so the phrase reads as
     // being taken hold of rather than fenced in.
-    ctx.strokeStyle = INK_BLUE
+    ctx.strokeStyle = ink(INK_BLUE)
     ctx.lineWidth = stroke
     ctx.lineCap = 'round'
     for (const seg of phrase.segments) {

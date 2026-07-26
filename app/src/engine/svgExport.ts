@@ -1,6 +1,14 @@
 import { layoutSceneForRender } from './document'
 import { FONT_FAMILY, PADDING } from './layout'
-import { buildPhrases, contentOffsetY, forEachSweptSegment, sceneTimingFor, type Phrase } from './render'
+import { materialFor, paintAxis, type Paint } from './materials'
+import {
+  buildPhrases,
+  contentOffsetY,
+  forEachSweptSegment,
+  phrasePaintBox,
+  sceneTimingFor,
+  type Phrase,
+} from './render'
 import { seededRandom, sketchEllipsePaths, sketchLinePaths, sketchRectPaths } from './sketch'
 import type { AnimatedDocument, EmphasisPresetId, Scene, TextLayout } from './model'
 
@@ -55,7 +63,8 @@ function round(v: number): number {
 
 interface StrokeSpec {
   paths: string[]
-  colour: string
+  /** Backend-neutral material, resolved to a <linearGradient> below. */
+  paint: Paint
   width: number
   cap: 'round' | 'butt'
 }
@@ -81,7 +90,7 @@ function annotationStrokes(phrase: Phrase, ox: number, oy: number, fontSize: num
     })
     out.push({
       paths,
-      colour: phrase.preset === 'marker-highlight' ? INK.marker : INK.bow,
+      paint: materialFor(phrase.preset, phrase.preset === 'marker-highlight' ? INK.marker : INK.bow),
       width: fontSize * 0.82,
       cap: 'round',
     })
@@ -97,7 +106,7 @@ function annotationStrokes(phrase: Phrase, ox: number, oy: number, fontSize: num
     })
     out.push({
       paths,
-      colour: phrase.preset === 'underline-draw' ? INK.blue : INK.red,
+      paint: materialFor(phrase.preset, phrase.preset === 'underline-draw' ? INK.blue : INK.red),
       width: stroke,
       cap: 'round',
     })
@@ -120,7 +129,7 @@ function annotationStrokes(phrase: Phrase, ox: number, oy: number, fontSize: num
         ),
       )
     }
-    out.push({ paths, colour: INK.red, width: stroke, cap: 'round' })
+    out.push({ paths, paint: materialFor(phrase.preset, INK.red), width: stroke, cap: 'round' })
     return out
   }
 
@@ -141,7 +150,7 @@ function annotationStrokes(phrase: Phrase, ox: number, oy: number, fontSize: num
         ),
       )
     }
-    out.push({ paths, colour: INK.blue, width: stroke, cap: 'round' })
+    out.push({ paths, paint: materialFor(phrase.preset, INK.blue), width: stroke, cap: 'round' })
     return out
   }
 
@@ -162,7 +171,7 @@ function annotationStrokes(phrase: Phrase, ox: number, oy: number, fontSize: num
         paths.push(...sketchLinePaths(x, bottom, x + arm * dir, bottom, 1, rand, { roughness, passes: 1 }))
       }
     }
-    out.push({ paths, colour: INK.blue, width: stroke, cap: 'round' })
+    out.push({ paths, paint: materialFor(phrase.preset, INK.blue), width: stroke, cap: 'round' })
     return out
   }
 
@@ -184,7 +193,9 @@ export function buildSceneSvg(doc: AnimatedDocument, layout: TextLayout): SvgExp
 
   const keyframes: string[] = []
   const strokeMarkup: string[] = []
+  const defs: string[] = []
   const staticPresets = new Set<EmphasisPresetId>()
+  const isMarkerInk = new Set<number>()
 
   phrases.forEach((phrase, i) => {
     if (!ANIMATABLE_IN_SVG.has(phrase.preset)) {
@@ -202,15 +213,38 @@ export function buildSceneSvg(doc: AnimatedDocument, layout: TextLayout): SvgExp
       `@keyframes draw-${i}{0%,${startPct}%{stroke-dashoffset:1}${endPct}%,100%{stroke-dashoffset:0}}`,
     )
 
-    for (const spec of annotationStrokes(phrase, ox, oy, doc.fontSize)) {
+    const box = phrasePaintBox(phrase, ox, oy, doc.fontSize)
+    const specs = annotationStrokes(phrase, ox, oy, doc.fontSize)
+    specs.forEach((spec, specIndex) => {
+      let paint: string
+      if (spec.paint.kind === 'solid') {
+        paint = spec.paint.colour
+      } else {
+        // userSpaceOnUse over the same box the canvas gradient uses, so both backends shade
+        // the stroke identically.
+        const id = `ink-${i}-${specIndex}`
+        const a = paintAxis(spec.paint, box)
+        defs.push(
+          `<linearGradient id="${id}" gradientUnits="userSpaceOnUse" x1="${round(a.x1)}" y1="${round(
+            a.y1,
+          )}" x2="${round(a.x2)}" y2="${round(a.y2)}">` +
+            spec.paint.stops
+              .map((st) => `<stop offset="${round(st.at * 100)}%" stop-color="${st.colour}"/>`)
+              .join('') +
+            `</linearGradient>`,
+        )
+        paint = `url(#${id})`
+      }
+      const isMarker = phrase.preset === 'marker-highlight' || phrase.preset === 'bow-highlight'
       for (const d of spec.paths) {
+        if (isMarker) isMarkerInk.add(strokeMarkup.length)
         strokeMarkup.push(
-          `<path d="${d}" pathLength="1" fill="none" stroke="${spec.colour}" stroke-width="${round(
+          `<path d="${d}" pathLength="1" fill="none" stroke="${paint}" stroke-width="${round(
             spec.width,
           )}" stroke-linecap="${spec.cap}" style="stroke-dasharray:1;animation:draw-${i} ${total}ms ${EASE_OUT_CUBIC} infinite"/>`,
         )
       }
-    }
+    })
   })
 
   const words = layout.lines.flatMap((l) => l.words)
@@ -234,12 +268,14 @@ export function buildSceneSvg(doc: AnimatedDocument, layout: TextLayout): SvgExp
     `@media (prefers-reduced-motion:reduce){path{animation:none!important;stroke-dashoffset:0!important}}` +
     keyframes.join('') +
     `</style>` +
+    (defs.length ? `<defs>${defs.join('')}</defs>` : '') +
     `<rect width="${doc.width}" height="${doc.height}" fill="#ffffff"/>` +
-    // Marker fills sit under the glyphs; the drawn annotations sit over them, matching the
-    // canvas renderer's three-pass layering.
-    strokeMarkup.filter((m) => m.includes(INK.marker) || m.includes(INK.bow)).join('') +
+    // Marker ink sits under the glyphs; the drawn annotations sit over them, matching the
+    // canvas renderer's three-pass layering. Tracked by index rather than by sniffing the
+    // markup, which stopped working once the colour became a gradient reference.
+    strokeMarkup.filter((_, idx) => isMarkerInk.has(idx)).join('') +
     textMarkup +
-    strokeMarkup.filter((m) => !(m.includes(INK.marker) || m.includes(INK.bow))).join('') +
+    strokeMarkup.filter((_, idx) => !isMarkerInk.has(idx)).join('') +
     `</svg>`
 
   return { svg, staticPresets: [...staticPresets] }
