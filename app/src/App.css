@@ -315,6 +315,51 @@
   white-space: nowrap;
 }
 
+.effect-group + .effect-group {
+  margin-top: 10px;
+}
+
+.effect-group-label {
+  display: block;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin-bottom: 4px;
+}
+
+/* Hovering a row renders that effect on one real word, through the same renderScene the
+   export uses — so the preview cannot promise something the GIF then fails to deliver. */
+.effect-preview {
+  position: fixed;
+  z-index: 40;
+  margin-left: 10px;
+  padding: 4px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow-lg);
+  pointer-events: none;
+}
+
+.effect-preview-canvas {
+  display: block;
+  width: 260px;
+  height: 104px;
+  border-radius: 4px;
+  /* The export is always on white; previewing on anything else would misrepresent it. */
+  background: #ffffff;
+}
+
+/* Touch and narrow screens have no hover, and a fixed popup beside a full-width row would
+   fall off the edge — the swatch and name carry it there. */
+@media (max-width: 720px), (hover: none) {
+  .effect-preview {
+    display: none;
+  }
+}
+
 .effect-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));

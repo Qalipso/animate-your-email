@@ -21,6 +21,7 @@ import {
   MIN_HOLD_MS,
   MIN_SPEED,
 } from './engine/model'
+import { EffectPreview } from './EffectPreview'
 import './App.css'
 
 const GENERATE_DEBOUNCE_MS = 400
@@ -41,26 +42,47 @@ const TEMPLATE_OPTIONS: { id: OutputMode | 'auto'; name: string; hint: string }[
   { id: 'story', name: 'Story', hint: 'Compact type for long text' },
 ]
 
+interface EffectOption {
+  id: EmphasisPresetId
+  name: string
+  swatch: string
+}
+
 /**
- * `swatch` is the colour the effect actually paints with, so the picker previews the
- * result instead of being ten identical rows of text.
+ * Grouped, because fourteen flat rows is a list to scan rather than a choice to make. The two
+ * groups are genuinely different things: one marks the page up around the words, the other
+ * does something to the words themselves.
+ *
+ * `swatch` is the colour the effect actually paints with, so a row hints at its result even
+ * before the hover preview renders.
  */
-const EMPHASIS_OPTIONS: { id: EmphasisPresetId; name: string; swatch: string }[] = [
-  { id: 'marker-highlight', name: 'Marker Highlight', swatch: '#ffd64f' },
-  { id: 'underline-draw', name: 'Underline Draw', swatch: '#2b6cff' },
-  { id: 'soft-glow', name: 'Soft Glow', swatch: '#6d9dff' },
-  { id: 'gentle-pop', name: 'Gentle Pop', swatch: '#1a1a1a' },
-  { id: 'shimmer', name: 'Shimmer', swatch: '#c9d4e8' },
-  { id: 'weight-shift', name: 'Weight Shift', swatch: '#4a4a4a' },
-  { id: 'burn', name: 'Burn', swatch: '#c43e14' },
-  { id: 'wash-away', name: 'Wash Away', swatch: '#789ab0' },
-  { id: 'bow-highlight', name: 'Pink Highlight + Bow', swatch: '#ff85b2' },
-  { id: 'glitch', name: 'Glitch', swatch: '#3cdcff' },
-  { id: 'circle-annotation', name: 'Circle It', swatch: '#e0463a' },
-  { id: 'box-annotation', name: 'Box It', swatch: '#2b6cff' },
-  { id: 'bracket', name: 'Brackets', swatch: '#2b6cff' },
-  { id: 'strike-through', name: 'Strike Through', swatch: '#e0463a' },
+const EFFECT_GROUPS: { label: string; options: EffectOption[] }[] = [
+  {
+    label: 'Hand-drawn marks',
+    options: [
+      { id: 'marker-highlight', name: 'Marker Highlight', swatch: '#ffd64f' },
+      { id: 'bow-highlight', name: 'Pink Highlight + Bow', swatch: '#ff85b2' },
+      { id: 'underline-draw', name: 'Underline Draw', swatch: '#2b6cff' },
+      { id: 'circle-annotation', name: 'Circle It', swatch: '#e0463a' },
+      { id: 'box-annotation', name: 'Box It', swatch: '#2b6cff' },
+      { id: 'bracket', name: 'Brackets', swatch: '#2b6cff' },
+      { id: 'strike-through', name: 'Strike Through', swatch: '#e0463a' },
+    ],
+  },
+  {
+    label: 'Effects on the words',
+    options: [
+      { id: 'gentle-pop', name: 'Gentle Pop', swatch: '#1a1a1a' },
+      { id: 'weight-shift', name: 'Weight Shift', swatch: '#4a4a4a' },
+      { id: 'soft-glow', name: 'Soft Glow', swatch: '#6d9dff' },
+      { id: 'shimmer', name: 'Shimmer', swatch: '#c9d4e8' },
+      { id: 'burn', name: 'Burn', swatch: '#c43e14' },
+      { id: 'wash-away', name: 'Wash Away', swatch: '#789ab0' },
+      { id: 'glitch', name: 'Glitch', swatch: '#3cdcff' },
+    ],
+  },
 ]
+
 
 type StatusKind = 'info' | 'success' | 'error'
 interface Status {
@@ -170,6 +192,7 @@ function App() {
   const [holdMs, setHoldMs] = useState(DEFAULT_HOLD_MS)
   const [replayNonce, setReplayNonce] = useState(0)
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null)
+  const [hoveredEffect, setHoveredEffect] = useState<{ id: EmphasisPresetId; top: number; left: number } | null>(null)
 
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
   const overlayCanvasRef = useRef<HTMLCanvasElement | null>(null)
@@ -208,6 +231,7 @@ function App() {
     updateSelection(null)
     setEffectTarget(null)
     setContextMenu(null)
+    setHoveredEffect(null)
   }, [updateSelection])
 
   // Auto-generate the preview whenever the text or template settings change — no
@@ -591,7 +615,7 @@ function App() {
     const blob = new Blob([svg], { type: 'image/svg+xml' })
     triggerDownload(blob, 'animation.svg')
     const names = staticPresets
-      .map((id) => EMPHASIS_OPTIONS.find((o) => o.id === id)?.name ?? id)
+      .map((id) => EFFECT_GROUPS.flatMap((g) => g.options).find((o) => o.id === id)?.name ?? id)
       .join(', ')
     setStatus({
       kind: 'success',
@@ -624,12 +648,38 @@ function App() {
     [doc, layout, version],
   )
 
+  /** The word the hover preview demonstrates on — the user's own, not a stand-in, when there is one. */
+  const previewWord = (effectTarget?.label.split(/\s+/)[0] ?? '').replace(/^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu, '') || 'Example'
+
+  function showPreview(id: EmphasisPresetId, el: HTMLElement) {
+    const rect = el.getBoundingClientRect()
+    setHoveredEffect({ id, top: rect.top, left: rect.right })
+  }
+
   const effectPicker = (onPick: (id: EmphasisPresetId) => void) =>
-    EMPHASIS_OPTIONS.map((o) => (
-      <button key={o.id} type="button" className="effect-option" onClick={() => onPick(o.id)}>
-        <span className="effect-swatch" style={{ background: o.swatch }} aria-hidden="true" />
-        {o.name}
-      </button>
+    EFFECT_GROUPS.map((group) => (
+      <div key={group.label} className="effect-group">
+        <span className="effect-group-label">{group.label}</span>
+        <div className="effect-grid">
+          {group.options.map((o) => (
+            <button
+              key={o.id}
+              type="button"
+              className="effect-option"
+              onClick={() => onPick(o.id)}
+              // Focus as well as hover: the preview is the only way to know what these do, so
+              // it cannot be mouse-only.
+              onMouseEnter={(e) => showPreview(o.id, e.currentTarget)}
+              onFocus={(e) => showPreview(o.id, e.currentTarget)}
+              onMouseLeave={() => setHoveredEffect(null)}
+              onBlur={() => setHoveredEffect(null)}
+            >
+              <span className="effect-swatch" style={{ background: o.swatch }} aria-hidden="true" />
+              {o.name}
+            </button>
+          ))}
+        </div>
+      </div>
     ))
 
   return (
@@ -872,6 +922,16 @@ function App() {
           )}
         </section>
       </div>
+
+      {hoveredEffect && (
+        <div
+          className="effect-preview"
+          style={{ top: hoveredEffect.top, left: hoveredEffect.left }}
+          role="presentation"
+        >
+          <EffectPreview preset={hoveredEffect.id} word={previewWord} />
+        </div>
+      )}
 
       {contextMenu && (
         <div ref={contextMenuRef} className="context-menu" style={{ left: contextMenu.x, top: contextMenu.y }}>
