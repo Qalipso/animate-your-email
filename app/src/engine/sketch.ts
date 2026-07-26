@@ -36,6 +36,51 @@ export interface SketchStyle {
   passes: number
 }
 
+function n(v: number): string {
+  return (Math.round(v * 100) / 100).toString()
+}
+
+/**
+ * The geometry of a hand-drawn line, as SVG path data — one `d` string per pass.
+ *
+ * Geometry is produced here and *only* here. The canvas renderer strokes these paths through
+ * Path2D and the SVG exporter emits them verbatim, so the two backends cannot drift apart.
+ * A second, independently-written renderer is precisely what caused DEC-007 and DEC-008.
+ */
+export function sketchLinePaths(
+  x1: number,
+  y1: number,
+  x2: number,
+  y2: number,
+  progress: number,
+  rand: () => number,
+  style: SketchStyle,
+): string[] {
+  if (progress <= 0) return []
+  const ex = x1 + (x2 - x1) * progress
+  const ey = y1 + (y2 - y1) * progress
+  const dx = ex - x1
+  const dy = ey - y1
+  const len = Math.hypot(dx, dy)
+  if (len < 0.5) return []
+  // Perpendicular unit vector — the direction a stroke is allowed to wander.
+  const px = -dy / len
+  const py = dx / len
+
+  const paths: string[] = []
+  for (let pass = 0; pass < style.passes; pass++) {
+    const bow = (rand() - 0.5) * 2 * style.roughness
+    const startJitter = (rand() - 0.5) * style.roughness * 0.6
+    const endJitter = (rand() - 0.5) * style.roughness * 0.6
+    paths.push(
+      `M ${n(x1 + px * startJitter)} ${n(y1 + py * startJitter)} Q ${n((x1 + ex) / 2 + px * bow)} ${n(
+        (y1 + ey) / 2 + py * bow,
+      )} ${n(ex + px * endJitter)} ${n(ey + py * endJitter)}`,
+    )
+  }
+  return paths
+}
+
 /**
  * A line from (x1,y1) to (x2,y2), drawn `progress` of the way along, with a hand-drawn bow.
  * The path is truncated rather than scaled, so a stroke growing over time keeps the exact
@@ -51,30 +96,8 @@ export function sketchLine(
   rand: () => number,
   style: SketchStyle,
 ) {
-  if (progress <= 0) return
-  const ex = x1 + (x2 - x1) * progress
-  const ey = y1 + (y2 - y1) * progress
-  const dx = ex - x1
-  const dy = ey - y1
-  const len = Math.hypot(dx, dy)
-  if (len < 0.5) return
-  // Perpendicular unit vector — the direction a stroke is allowed to wander.
-  const px = -dy / len
-  const py = dx / len
-
-  for (let pass = 0; pass < style.passes; pass++) {
-    const bow = (rand() - 0.5) * 2 * style.roughness
-    const startJitter = (rand() - 0.5) * style.roughness * 0.6
-    const endJitter = (rand() - 0.5) * style.roughness * 0.6
-    ctx.beginPath()
-    ctx.moveTo(x1 + px * startJitter, y1 + py * startJitter)
-    ctx.quadraticCurveTo(
-      (x1 + ex) / 2 + px * bow,
-      (y1 + ey) / 2 + py * bow,
-      ex + px * endJitter,
-      ey + py * endJitter,
-    )
-    ctx.stroke()
+  for (const d of sketchLinePaths(x1, y1, x2, y2, progress, rand, style)) {
+    ctx.stroke(new Path2D(d))
   }
 }
 
@@ -83,6 +106,42 @@ export function sketchLine(
  * Slightly over-sweeps (a real circled word usually overshoots where the pen started), and
  * each pass wobbles its radius so the two laps don't overlap exactly.
  */
+export function sketchEllipsePaths(
+  cx: number,
+  cy: number,
+  rx: number,
+  ry: number,
+  progress: number,
+  rand: () => number,
+  style: SketchStyle,
+): string[] {
+  if (progress <= 0) return []
+  const OVERSWEEP = 1.12 // laps slightly past the start, the way a hand does
+  const startAngle = -Math.PI * 0.75
+  const segments = 48
+
+  const paths: string[] = []
+  for (let pass = 0; pass < style.passes; pass++) {
+    const rxJitter = rx + (rand() - 0.5) * style.roughness * 2
+    const ryJitter = ry + (rand() - 0.5) * style.roughness * 2
+    const phase = (rand() - 0.5) * 0.25
+    const end = startAngle + Math.PI * 2 * OVERSWEEP * progress
+    let d = ''
+    for (let i = 0; i <= segments; i++) {
+      const a = startAngle + ((end - startAngle) * i) / segments
+      if (a > end) break
+      // A slow sinusoidal wobble around the path reads as an unsteady hand; a per-point
+      // random offset would just read as noise.
+      const wobble = Math.sin(a * 3 + phase * 8) * style.roughness * 0.5
+      const x = cx + Math.cos(a + phase) * (rxJitter + wobble)
+      const y = cy + Math.sin(a + phase) * (ryJitter + wobble)
+      d += `${i === 0 ? 'M' : ' L'} ${n(x)} ${n(y)}`
+    }
+    if (d) paths.push(d)
+  }
+  return paths
+}
+
 export function sketchEllipse(
   ctx: Ctx2D,
   cx: number,
@@ -93,29 +152,8 @@ export function sketchEllipse(
   rand: () => number,
   style: SketchStyle,
 ) {
-  if (progress <= 0) return
-  const OVERSWEEP = 1.12 // laps slightly past the start, the way a hand does
-  const startAngle = -Math.PI * 0.75
-  const segments = 48
-
-  for (let pass = 0; pass < style.passes; pass++) {
-    const rxJitter = rx + (rand() - 0.5) * style.roughness * 2
-    const ryJitter = ry + (rand() - 0.5) * style.roughness * 2
-    const phase = (rand() - 0.5) * 0.25
-    const end = startAngle + Math.PI * 2 * OVERSWEEP * progress
-    ctx.beginPath()
-    for (let i = 0; i <= segments; i++) {
-      const a = startAngle + ((end - startAngle) * i) / segments
-      if (a > end) break
-      // A slow sinusoidal wobble around the path reads as an unsteady hand; a per-point
-      // random offset would just read as noise.
-      const wobble = Math.sin(a * 3 + phase * 8) * style.roughness * 0.5
-      const x = cx + Math.cos(a + phase) * (rxJitter + wobble)
-      const y = cy + Math.sin(a + phase) * (ryJitter + wobble)
-      if (i === 0) ctx.moveTo(x, y)
-      else ctx.lineTo(x, y)
-    }
-    ctx.stroke()
+  for (const d of sketchEllipsePaths(cx, cy, rx, ry, progress, rand, style)) {
+    ctx.stroke(new Path2D(d))
   }
 }
 
@@ -123,6 +161,35 @@ export function sketchEllipse(
  * A rectangle drawn edge by edge, `progress` of the way round its perimeter — so it reads as
  * being drawn, not as fading in.
  */
+export function sketchRectPaths(
+  x: number,
+  y: number,
+  w: number,
+  h: number,
+  progress: number,
+  rand: () => number,
+  style: SketchStyle,
+): string[] {
+  if (progress <= 0) return []
+  const edges: [number, number, number, number][] = [
+    [x, y, x + w, y],
+    [x + w, y, x + w, y + h],
+    [x + w, y + h, x, y + h],
+    [x, y + h, x, y],
+  ]
+  const perimeter = 2 * (w + h)
+  let drawn = perimeter * progress
+  const paths: string[] = []
+  for (const [ax, ay, bx, by] of edges) {
+    if (drawn <= 0) break
+    const len = Math.hypot(bx - ax, by - ay)
+    const edgeProgress = Math.min(1, drawn / len)
+    paths.push(...sketchLinePaths(ax, ay, bx, by, edgeProgress, rand, style))
+    drawn -= len
+  }
+  return paths
+}
+
 export function sketchRect(
   ctx: Ctx2D,
   x: number,
@@ -133,20 +200,7 @@ export function sketchRect(
   rand: () => number,
   style: SketchStyle,
 ) {
-  if (progress <= 0) return
-  const edges: [number, number, number, number][] = [
-    [x, y, x + w, y],
-    [x + w, y, x + w, y + h],
-    [x + w, y + h, x, y + h],
-    [x, y + h, x, y],
-  ]
-  const perimeter = 2 * (w + h)
-  let drawn = perimeter * progress
-  for (const [ax, ay, bx, by] of edges) {
-    if (drawn <= 0) return
-    const len = Math.hypot(bx - ax, by - ay)
-    const edgeProgress = Math.min(1, drawn / len)
-    sketchLine(ctx, ax, ay, bx, by, edgeProgress, rand, style)
-    drawn -= len
+  for (const d of sketchRectPaths(x, y, w, h, progress, rand, style)) {
+    ctx.stroke(new Path2D(d))
   }
 }

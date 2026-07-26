@@ -5,6 +5,7 @@ import { PADDING, createMeasurer, metricsFor, wrapBlocksIntoLines } from '../eng
 import { computeSceneTiming, renderScene, sceneTimingFor } from '../engine/render'
 import { seededRandom } from '../engine/sketch'
 import { buildTimeline, renderTimelineFrame } from '../engine/timeline'
+import { buildSceneSvg } from '../engine/svgExport'
 import { snapDelayMs } from '../gifExport'
 import {
   MAX_CHARACTERS,
@@ -393,6 +394,80 @@ describe('hand-drawn annotations', () => {
       expect(fills).toHaveLength(0)
     },
   )
+})
+
+describe('SVG export', () => {
+  async function svgFor(preset: string, text = 'We shipped [[three major updates]] this quarter, finally.') {
+    const doc = await buildAnimatedDocument(text, { mode: 'paragraph', modeIsOverridden: true })
+    for (const scene of doc.scenes) {
+      for (const block of scene.blocks) {
+        for (const run of block.runs) {
+          // Every animated run, not just the detected phrases: the 15% budget also promotes
+          // long content words, and those carry their own preset.
+          if (run.highlight?.animated) run.highlight.emphasisPreset = preset as never
+          if (run.highlight && run.highlight.kind !== 'content-word') {
+            run.highlight.animated = true
+            run.highlight.emphasisPreset = preset as never
+          }
+        }
+      }
+    }
+    const layout = await layoutSceneForRender(doc, doc.scenes[0])
+    return { doc, layout, ...buildSceneSvg(doc, layout) }
+  }
+
+  it('keeps every word as real text rather than outlining it', async () => {
+    const { svg, layout } = await svgFor('circle-annotation')
+    const wordCount = layout.lines.flatMap((l) => l.words).length
+    expect((svg.match(/<text/g) ?? []).length).toBe(wordCount)
+    // The point of a vector export is selectable, resizable text; paths-as-glyphs would
+    // silently throw that away.
+    expect(svg).toContain('We')
+    expect(svg).toMatch(/^<svg xmlns="http:\/\/www\.w3\.org\/2000\/svg"/)
+  })
+
+  it('declares the frame it was laid out for', async () => {
+    const { svg, doc } = await svgFor('box-annotation')
+    expect(svg).toContain(`viewBox="0 0 ${doc.width} ${doc.height}"`)
+  })
+
+  it('animates on the same clock the canvas renderer uses, including tempo', async () => {
+    const doc = await buildAnimatedDocument('We shipped [[three major updates]] this quarter, finally.', {
+      mode: 'paragraph',
+      modeIsOverridden: true,
+      speed: 2,
+    })
+    for (const scene of doc.scenes) {
+      for (const block of scene.blocks) {
+        for (const run of block.runs) {
+          if (run.highlight && run.highlight.kind !== 'content-word') {
+            run.highlight.animated = true
+            run.highlight.emphasisPreset = 'underline-draw'
+          }
+        }
+      }
+    }
+    const layout = await layoutSceneForRender(doc, doc.scenes[0])
+    const timing = sceneTimingFor(doc, layout)
+    const { svg } = buildSceneSvg(doc, layout)
+    expect(svg).toContain(`${Math.max(1, timing.totalMs)}ms`)
+  })
+
+  it('escapes text so user input cannot break out of the markup', async () => {
+    const { svg } = await svgFor('underline-draw', 'A <script> tag & an "odd" quote in [[the copy]] here.')
+    expect(svg).not.toContain('<script>')
+    expect(svg).toContain('&lt;script&gt;')
+    expect(svg).toContain('&amp;')
+  })
+
+  it('reports which presets it renders at rest instead of pretending to animate them', async () => {
+    const drawn = await svgFor('circle-annotation')
+    expect(drawn.staticPresets).toEqual([])
+
+    // Burn is particles and per-glyph colour; SVG shows its settled state and says so.
+    const particles = await svgFor('burn')
+    expect(particles.staticPresets).toContain('burn')
+  })
 })
 
 describe('GIF frame timing', () => {

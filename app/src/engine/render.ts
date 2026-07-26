@@ -97,7 +97,7 @@ export function sceneTimingFor(doc: AnimatedDocument, layout: TextLayout): Scene
 // where the word spaces are. So sweeps are computed per phrase here, not per word.
 // ---------------------------------------------------------------------------
 
-interface PhraseSegment {
+export interface PhraseSegment {
   /** Line-box top, in layout coordinates. */
   y: number
   x0: number
@@ -106,7 +106,7 @@ interface PhraseSegment {
   offset: number
 }
 
-interface Phrase {
+export interface Phrase {
   runId: string
   animatedIndex: number
   preset: EmphasisPresetId
@@ -116,7 +116,7 @@ interface Phrase {
   lastWord: LayoutWord
 }
 
-function buildPhrases(layout: TextLayout): Phrase[] {
+export function buildPhrases(layout: TextLayout): Phrase[] {
   const byRunId = new Map<string, Phrase>()
   for (const line of layout.lines) {
     let segment: { phrase: Phrase; seg: PhraseSegment } | null = null
@@ -165,7 +165,7 @@ function phraseProgress(phrase: Phrase, tMs: number, timing: SceneTiming): numbe
 }
 
 /** Calls `draw` for the portion of each segment covered by a left-to-right sweep at `progress`. */
-function forEachSweptSegment(
+export function forEachSweptSegment(
   phrase: Phrase,
   progress: number,
   draw: (seg: PhraseSegment, sweptTo: number) => void,
