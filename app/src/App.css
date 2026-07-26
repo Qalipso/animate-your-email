@@ -1,0 +1,606 @@
+.app {
+  width: 100%;
+  max-width: 1180px;
+  padding: 40px 24px 64px;
+  box-sizing: border-box;
+}
+
+/* ---------- Masthead ---------- */
+
+.masthead {
+  max-width: 640px;
+  margin: 0 auto 24px;
+  text-align: center;
+}
+
+.masthead h1 {
+  font-size: clamp(26px, 3.4vw, 34px);
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  color: var(--text-h);
+  margin: 0 0 8px;
+}
+
+.tagline {
+  font-size: 15px;
+  color: var(--muted);
+  margin: 0;
+  text-wrap: balance;
+}
+
+/* ---------- Workspace ---------- */
+
+/* Single column by default; on a desktop-width screen the preview sits beside the editor
+   and stays put while you scroll the text, instead of the whole tool being a tall stack
+   where the preview lands below the fold. */
+.workspace {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 20px;
+  align-items: start;
+}
+
+@media (min-width: 960px) {
+  .workspace {
+    grid-template-columns: minmax(0, 5fr) minmax(0, 6fr);
+  }
+
+  .preview-panel {
+    position: sticky;
+    top: 24px;
+    /* Backstop for very short viewports: the panel scrolls on its own rather than pushing
+       the primary Copy GIF button off the bottom of the screen. */
+    max-height: calc(100svh - 48px);
+    overflow-y: auto;
+  }
+}
+
+.panel {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-sm);
+  padding: 20px;
+}
+
+.preview-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+/* ---------- Fields ---------- */
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.field + .field,
+.field + .customize {
+  margin-top: 20px;
+}
+
+.field-label {
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.field-footer {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.field-hint {
+  font-size: 12px;
+  color: var(--muted);
+  margin: 0;
+}
+
+.text-area {
+  width: 100%;
+  box-sizing: border-box;
+  font-size: 15px;
+  line-height: 1.6;
+  padding: 12px 14px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--text-h);
+  resize: vertical;
+  font-family: inherit;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.text-area:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+.char-count {
+  font-size: 12px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* Silently hitting the cap and losing the tail of a paste is worth a warning before it
+   happens, not just a number that quietly stops moving. */
+.char-count-warn {
+  color: var(--danger);
+  font-weight: 600;
+}
+
+/* ---------- Template picker ---------- */
+
+.template-picker {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.template-option {
+  font: inherit;
+  font-size: 14px;
+  padding: 7px 16px;
+  border: 1px solid var(--border-strong);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--text);
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+}
+
+.template-option:hover {
+  border-color: var(--accent);
+  color: var(--text-h);
+}
+
+.template-option.active {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-weight: 600;
+}
+
+/* ---------- Preview ---------- */
+
+/* The frame's height is now driven by the text (it grows so everything fits in one image),
+   so the preview is bounded by the viewport instead of only by width — otherwise a tall
+   frame pushes the export buttons off-screen in the sticky column. Constraining the *width*
+   via the frame's own aspect ratio keeps the canvas box exactly the drawn area, which the
+   click hit-testing depends on. */
+.preview-frame {
+  position: relative;
+  width: 100%;
+  max-width: min(600px, calc(52vh * var(--frame-aspect, 1.6)));
+  margin: 0 auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  box-shadow: var(--shadow-md);
+  /* The exported image is always on white; showing it on white here keeps the preview an
+     honest representation of the file in both colour schemes. */
+  background: #ffffff;
+}
+
+.preview-frame canvas {
+  display: block;
+  width: 100%;
+  height: auto;
+  cursor: pointer;
+}
+
+.selection-overlay {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
+.preview-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.playback {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-left: auto;
+}
+
+/* The frame is auto-fitted, so its real dimensions and type size are information the user
+   otherwise has no way to see — and "fitted to one frame" explains a shrunk font. */
+.frame-meta {
+  font-size: 12px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.loop-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--muted);
+  cursor: pointer;
+  user-select: none;
+}
+
+.loop-toggle input {
+  accent-color: var(--accent);
+  margin: 0;
+}
+
+.hint {
+  font-size: 13px;
+  color: var(--muted);
+  margin: 0;
+  text-align: center;
+}
+
+.hint strong {
+  color: var(--text-h);
+  font-weight: 600;
+}
+
+.empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  min-height: 320px;
+  color: var(--muted);
+  text-align: center;
+}
+
+/* A quiet stand-in for the preview card so the panel keeps its shape while empty,
+   instead of the layout collapsing and jumping when the first preview appears. */
+.empty-art {
+  width: 100%;
+  max-width: 320px;
+  aspect-ratio: 3 / 2;
+  border-radius: var(--radius-sm);
+  border: 1px dashed var(--border-strong);
+  background:
+    linear-gradient(var(--surface-2) 0 0) padding-box,
+    repeating-linear-gradient(
+      180deg,
+      var(--border) 0 8px,
+      transparent 8px 28px
+    );
+  opacity: 0.6;
+}
+
+/* ---------- Effect picker ---------- */
+
+/* The same list is used inline (after a drag-selection) and in the right-click menu, so
+   discovering effects never depends on knowing that right-click does something. */
+.effect-bar {
+  border: 1px solid var(--accent);
+  background: var(--accent-soft);
+  border-radius: var(--radius-sm);
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.effect-bar-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.effect-bar-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-h);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.effect-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  gap: 4px;
+}
+
+.effect-option {
+  font: inherit;
+  font-size: 13px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 10px;
+  border: none;
+  background: transparent;
+  color: var(--text-h);
+  text-align: left;
+  cursor: pointer;
+  border-radius: 6px;
+  width: 100%;
+}
+
+.effect-option:hover {
+  background: var(--surface);
+}
+
+.effect-swatch {
+  width: 12px;
+  height: 12px;
+  border-radius: 3px;
+  flex: none;
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.12);
+}
+
+.context-menu {
+  position: fixed;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  z-index: 20;
+  white-space: nowrap;
+  box-shadow: var(--shadow-lg);
+  /* Backstop for viewports too short to fit the whole menu even after the JS
+     reposition — scrolls internally instead of clipping silently. */
+  max-height: calc(100vh - 16px);
+  overflow-y: auto;
+}
+
+/* ---------- Actions ---------- */
+
+.actions {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+/* "Copy GIF" is the strongest call-to-action on the screen — copying, not saving, is the
+   primary way out of the tool. */
+.cta-primary {
+  font: inherit;
+  font-size: 16px;
+  font-weight: 650;
+  padding: 12px 26px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: var(--accent);
+  color: #fff;
+  cursor: pointer;
+  box-shadow: 0 2px 10px rgba(43, 108, 255, 0.3);
+  transition: background 0.15s ease, transform 0.05s ease;
+}
+
+.cta-primary:hover:not(:disabled) {
+  background: var(--accent-strong);
+}
+
+.cta-primary:active:not(:disabled) {
+  transform: translateY(1px);
+}
+
+.cta-primary:disabled {
+  opacity: 0.55;
+  cursor: default;
+  box-shadow: none;
+}
+
+.cta-secondary {
+  font: inherit;
+  font-size: 15px;
+  font-weight: 600;
+  padding: 11px 20px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--text-h);
+  cursor: pointer;
+  transition: border-color 0.15s ease;
+}
+
+.cta-secondary:hover:not(:disabled) {
+  border-color: var(--accent);
+}
+
+.cta-secondary:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+/* Least prominent tier: cancel, replay, PNG/ZIP — present, never competing. */
+.ghost-button {
+  font: inherit;
+  font-size: 13px;
+  padding: 6px 8px;
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  border-radius: 6px;
+}
+
+.ghost-button:hover {
+  color: var(--accent);
+  background: var(--accent-soft);
+}
+
+/* GIF encoding is seconds of synchronous work in a worker; without this the app just
+   looks frozen with a disabled button. */
+.progress {
+  height: 4px;
+  border-radius: 999px;
+  background: var(--surface-2);
+  overflow: hidden;
+}
+
+/* Driven by transform, not width: the worker reports progress ~50 times per export, and
+   animating width would relayout the panel on every one of them. */
+.progress-bar {
+  width: 100%;
+  height: 100%;
+  background: var(--accent);
+  border-radius: 999px;
+  transform-origin: left center;
+  transition: transform 0.12s linear;
+}
+
+/* Stated before the click, not as a status message after it: the clipboard limitation is a
+   property of the browser, so the user deserves to know it while choosing an action. */
+.disclosure {
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--muted);
+  margin: 0;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+}
+
+.disclosure strong {
+  color: var(--text-h);
+  font-weight: 650;
+}
+
+.export-menu-wrap {
+  position: relative;
+  align-self: flex-start;
+}
+
+/* ---------- Advanced ---------- */
+
+.customize {
+  border-top: 1px solid var(--border);
+  padding-top: 14px;
+}
+
+.customize summary {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--muted);
+  cursor: pointer;
+  list-style: none;
+}
+
+.customize summary::-webkit-details-marker {
+  display: none;
+}
+
+.customize summary::after {
+  content: ' ▾';
+}
+
+.customize[open] summary::after {
+  content: ' ▴';
+}
+
+.customize-body {
+  margin-top: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.select-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.select-field select {
+  font: inherit;
+  font-size: 14px;
+  font-weight: 400;
+  letter-spacing: normal;
+  text-transform: none;
+  padding: 8px 10px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--text-h);
+}
+
+.chip-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.chip {
+  font: inherit;
+  font-size: 13px;
+  padding: 5px 12px;
+  border: 1px solid var(--border-strong);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--muted);
+  cursor: pointer;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chip-on {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-weight: 600;
+}
+
+/* ---------- Status ---------- */
+
+.status {
+  font-size: 13px;
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  color: var(--text);
+}
+
+.status-success {
+  border-color: color-mix(in srgb, var(--success) 40%, transparent);
+  color: var(--success);
+  background: color-mix(in srgb, var(--success) 8%, transparent);
+}
+
+.status-error {
+  border-color: color-mix(in srgb, var(--danger) 40%, transparent);
+  color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 8%, transparent);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * {
+    transition-duration: 0.01ms !important;
+  }
+}
