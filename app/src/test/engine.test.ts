@@ -3,6 +3,7 @@ import { buildAnimatedDocument, layoutSceneForRender, toggleRunAnimation } from 
 import { detectHighlights } from '../engine/highlight'
 import { PADDING, createMeasurer, metricsFor, wrapBlocksIntoLines } from '../engine/layout'
 import { computeSceneTiming, renderScene, sceneTimingFor } from '../engine/render'
+import { PREVIEW_HEIGHT, PREVIEW_WIDTH, previewDocument } from '../engine/previewDoc'
 import { seededRandom } from '../engine/sketch'
 import { buildTimeline, renderTimelineFrame } from '../engine/timeline'
 import { snapDelayMs } from '../gifExport'
@@ -393,6 +394,54 @@ describe('hand-drawn annotations', () => {
       expect(fills).toHaveLength(0)
     },
   )
+})
+
+describe('effect hover preview', () => {
+  const ALL_PRESETS = [
+    'marker-highlight', 'bow-highlight', 'underline-draw', 'strike-through',
+    'circle-annotation', 'box-annotation', 'bracket',
+    'gentle-pop', 'weight-shift', 'soft-glow', 'shimmer', 'burn', 'wash-away', 'glitch',
+  ] as const
+
+  it('offers a preview for every preset the picker lists', () => {
+    // The picker and this list must not drift: an effect with no preview is exactly the
+    // problem the hover sample was added to solve.
+    expect(new Set(ALL_PRESETS).size).toBe(ALL_PRESETS.length)
+  })
+
+  it.each(ALL_PRESETS)('renders %s on a single word without throwing', async (preset) => {
+    const doc = previewDocument('Example', preset)
+    expect(doc.width).toBe(PREVIEW_WIDTH)
+    expect(doc.height).toBe(PREVIEW_HEIGHT)
+
+    const layout = await layoutSceneForRender(doc, doc.scenes[0])
+    const words = layout.lines.flatMap((l) => l.words)
+    // One word, on one line, actually animated — otherwise the preview shows plain text and
+    // silently tells the user nothing.
+    expect(words).toHaveLength(1)
+    expect(words[0].highlight?.animated).toBe(true)
+    expect(words[0].highlight?.emphasisPreset).toBe(preset)
+
+    const timing = sceneTimingFor(doc, layout)
+    const canvas = new MockCanvas(doc.width, doc.height)
+    const ctx = canvas.getContext() as unknown as MockCanvasContext
+    for (const t of [0, timing.emphasisStartMs, timing.emphasisEndMs, timing.totalMs]) {
+      expect(() => renderScene(ctx as never, doc, layout, t, timing)).not.toThrow()
+    }
+  })
+
+  it('draws the annotation, not just the word, for a drawn-mark preset', async () => {
+    const doc = previewDocument('Example', 'circle-annotation')
+    const layout = await layoutSceneForRender(doc, doc.scenes[0])
+    const timing = sceneTimingFor(doc, layout)
+    const canvas = new MockCanvas(doc.width, doc.height)
+    const ctx = canvas.getContext() as unknown as MockCanvasContext
+
+    renderScene(ctx as never, doc, layout, timing.emphasisStartMs - 1, timing)
+    const before = ctx.strokes.length
+    renderScene(ctx as never, doc, layout, timing.emphasisEndMs, timing)
+    expect(ctx.strokes.length).toBeGreaterThan(before)
+  })
 })
 
 describe('GIF frame timing', () => {

@@ -124,6 +124,56 @@ test('dragging across a phrase offers the effect picker and applies a choice', a
     .toBeGreaterThan(0)
 })
 
+test('hovering an effect shows a live sample of the user’s own word', async ({ page }) => {
+  await page.goto('/')
+  const canvas = page.locator('.preview-frame canvas').first()
+  const box = (await canvas.boundingBox())!
+
+  await page.mouse.move(box.x + box.width * 0.15, box.y + box.height * 0.42)
+  await page.mouse.down()
+  await page.mouse.move(box.x + box.width * 0.6, box.y + box.height * 0.42, { steps: 12 })
+  await page.mouse.up()
+
+  const bar = page.locator('.effect-bar')
+  await expect(bar).toBeVisible()
+  // Grouped, not one flat list of fourteen.
+  await expect(bar.locator('.effect-group')).toHaveCount(2)
+  await expect(bar.locator('.effect-option')).toHaveCount(EFFECT_COUNT)
+
+  await expect(page.locator('.effect-preview')).toHaveCount(0)
+  await bar.locator('.effect-option', { hasText: 'Circle It' }).hover()
+
+  const preview = page.locator('.effect-preview')
+  await expect(preview).toBeVisible()
+
+  // It must actually draw the annotation, not just the word — a preview that shows plain text
+  // tells the user nothing, which is the problem it exists to solve.
+  await expect
+    .poll(
+      () =>
+        page.evaluate(() => {
+          const c = document.querySelector('.effect-preview-canvas') as HTMLCanvasElement | null
+          if (!c) return -1
+          const { data } = c.getContext('2d')!.getImageData(0, 0, c.width, c.height)
+          let red = 0
+          for (let i = 0; i < data.length; i += 4) {
+            if (data[i] > 140 && data[i + 1] < 110 && data[i + 2] < 100) red++
+          }
+          return red
+        }),
+      { timeout: 8000 },
+    )
+    .toBeGreaterThan(0)
+
+  // The sample is drawn from the phrase the user selected — which phrase that is depends on
+  // where the drag landed, so assert it is a real selection rather than a fixed string.
+  const label = (await bar.locator('.effect-bar-title').textContent()) ?? ''
+  expect(label).toMatch(/Effect for “\S+/)
+
+  await page.locator('.masthead h1').hover()
+  await expect(page.locator('.effect-preview')).toHaveCount(0)
+})
+
 test('the export UI promises only what this browser can actually do', async ({ page }) => {
   await page.goto('/')
   const capability = await page.evaluate(() => {
