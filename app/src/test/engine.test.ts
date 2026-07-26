@@ -5,6 +5,7 @@ import { PADDING, createMeasurer, metricsFor, wrapBlocksIntoLines } from '../eng
 import { computeSceneTiming, renderScene, sceneTimingFor } from '../engine/render'
 import { PREVIEW_HEIGHT, PREVIEW_WIDTH, previewDocument } from '../engine/previewDoc'
 import { seededRandom } from '../engine/sketch'
+import { applySuggestions, suggestEmphasis, suggestForPhrase } from '../engine/suggest'
 import { buildTimeline, renderTimelineFrame } from '../engine/timeline'
 import { buildSceneSvg } from '../engine/svgExport'
 import { snapDelayMs } from '../gifExport'
@@ -516,6 +517,72 @@ describe('effect hover preview', () => {
     const before = ctx.strokes.length
     renderScene(ctx as never, doc, layout, timing.emphasisEndMs, timing)
     expect(ctx.strokes.length).toBeGreaterThan(before)
+  })
+})
+
+describe('local effect suggestion', () => {
+  it('strikes through a negation rather than celebrating it', () => {
+    expect(suggestForPhrase('not shipping this quarter', 'markup-primary', 0).preset).toBe('strike-through')
+    expect(suggestForPhrase('no longer supported', 'content-word', 0).preset).toBe('strike-through')
+    // A negation must win over the category, or "we did NOT hit the record" gets highlighted
+    // as if it were good news.
+    expect(suggestForPhrase("we didn't reach 200 users", 'number-date', 0).preset).toBe('strike-through')
+  })
+
+  it('matches the mark to what the phrase is', () => {
+    expect(suggestForPhrase('"exactly what we needed"', 'quote', 0).preset).toBe('bracket')
+    expect(suggestForPhrase('July 12, 2026', 'number-date', 0).preset).toBe('circle-annotation')
+    expect(suggestForPhrase('get started', 'cta', 0).preset).toBe('marker-highlight')
+    expect(suggestForPhrase('the last line here', 'final-sentence', 0).preset).toBe('underline-draw')
+  })
+
+  it('varies between equally good options so a page of figures is not a page of circles', () => {
+    const picks = [0, 1, 2].map((i) => suggestForPhrase('200', 'number-date', i).preset)
+    expect(new Set(picks).size).toBeGreaterThan(1)
+  })
+
+  it('is deterministic — the same document always suggests the same set', async () => {
+    const text = 'We announced [[three major updates]] and shared a demo with 200 attendees on July 12, 2026.'
+    const a = await buildAnimatedDocument(text, { mode: 'paragraph', modeIsOverridden: true })
+    const b = await buildAnimatedDocument(text, { mode: 'paragraph', modeIsOverridden: true })
+    expect(suggestEmphasis(a).map((s) => s.to)).toEqual(suggestEmphasis(b).map((s) => s.to))
+  })
+
+  it('applies only to animated phrases and reports what it changed', async () => {
+    const doc = await buildAnimatedDocument(
+      'We announced [[three major updates]] and shared a demo with 200 attendees on July 12, 2026.',
+      { mode: 'paragraph', modeIsOverridden: true },
+    )
+    const suggestions = suggestEmphasis(doc)
+    expect(suggestions.length).toBeGreaterThan(0)
+
+    const untouched = doc.scenes
+      .flatMap((s) => s.blocks.flatMap((b) => b.runs))
+      .filter((r) => r.highlight && !r.highlight.animated)
+      .map((r) => r.highlight!.emphasisPreset)
+
+    applySuggestions(doc, suggestions)
+
+    const after = doc.scenes
+      .flatMap((s) => s.blocks.flatMap((b) => b.runs))
+      .filter((r) => r.highlight && !r.highlight.animated)
+      .map((r) => r.highlight!.emphasisPreset)
+    expect(after).toEqual(untouched)
+
+    for (const s of suggestions) {
+      const run = doc.scenes.flatMap((sc) => sc.blocks.flatMap((b) => b.runs)).find((r) => r.id === s.runId)
+      expect(run?.highlight?.emphasisPreset).toBe(s.to)
+    }
+  })
+
+  it('every suggestion carries a reason the UI can show', async () => {
+    const doc = await buildAnimatedDocument('Get started with the new dashboard today.', {
+      mode: 'paragraph',
+      modeIsOverridden: true,
+    })
+    for (const s of suggestEmphasis(doc)) {
+      expect(s.reason.length).toBeGreaterThan(0)
+    }
   })
 })
 

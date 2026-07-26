@@ -14,7 +14,7 @@ once it hits the height ceiling. Rendering is supersampled 2× and encoded at a 
 |---|---|---|---|---|---|---|
 | `01-card-thank-you.gif` | Short note (Card) | 600×320 | 40px | 26 | 1.3s | 24 KB |
 | `02-paragraph-launch-recap.gif` | Paragraph with markup and a date | 600×400 | 26px | 44 | 2.2s | 56 KB |
-| `03-story-quarter-recap.gif` | Multi-paragraph email, fitted to one frame | 600×489 | 28px | 98 | 4.9s | 130 KB |
+| `03-story-quarter-recap.gif` | Multi-paragraph email, fitted to one frame | 600×489 | 28px | 98 | 4.9s | 134 KB |
 | `04-cyrillic-and-emoji.gif` | Non-Latin script and emoji | 600×320 | 40px | 62 | 3.1s | 59 KB |
 
 Regenerate after any render or export change:

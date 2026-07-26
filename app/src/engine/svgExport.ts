@@ -67,6 +67,8 @@ interface StrokeSpec {
   paint: Paint
   width: number
   cap: 'round' | 'butt'
+  /** Mirrors the canvas globalAlpha for repeat passes. */
+  opacity?: number
 }
 
 /** Every stroke an annotation is made of, at its finished shape. Progress is animated in CSS. */
@@ -94,6 +96,24 @@ function annotationStrokes(phrase: Phrase, ox: number, oy: number, fontSize: num
       width: fontSize * 0.82,
       cap: 'round',
     })
+    // The denser core pass, mirroring drawMarkerStroke.
+    const coreRand = seededRandom(`${phrase.runId}:marker:core`)
+    const corePaths: string[] = []
+    forEachSweptSegment(phrase, 1, (seg, sweptTo) => {
+      const y = oy + seg.y + fontSize * 0.5
+      corePaths.push(
+        ...sketchLinePaths(ox + seg.x0 + 1, y, ox + sweptTo - 1, y, 1, coreRand, {
+          roughness: fontSize * 0.06,
+          passes: 1,
+        }),
+      )
+    })
+    out.push({
+      paths: corePaths,
+      paint: materialFor(phrase.preset, phrase.preset === 'marker-highlight' ? INK.marker : INK.bow),
+      width: fontSize * 0.46,
+      cap: 'round',
+    })
     return out
   }
 
@@ -110,6 +130,22 @@ function annotationStrokes(phrase: Phrase, ox: number, oy: number, fontSize: num
       width: stroke,
       cap: 'round',
     })
+    if (phrase.preset === 'underline-draw') {
+      // The hand's second pass, mirroring drawPhraseOverlay.
+      const backRand = seededRandom(`${phrase.runId}:underline:back`)
+      const backPaths: string[] = []
+      forEachSweptSegment(phrase, 1, (seg, sweptTo) => {
+        const y = oy + seg.y + fontSize * 0.78 + fontSize * 0.2
+        const inset = (sweptTo - seg.x0) * 0.12
+        backPaths.push(
+          ...sketchLinePaths(ox + seg.x0 + inset, y, ox + sweptTo - inset, y, 1, backRand, {
+            roughness: roughness * 1.3,
+            passes: 1,
+          }),
+        )
+      })
+      out.push({ paths: backPaths, paint: materialFor(phrase.preset, INK.blue), width: stroke * 0.55, cap: 'round', opacity: 0.55 })
+    }
     return out
   }
 
@@ -241,7 +277,9 @@ export function buildSceneSvg(doc: AnimatedDocument, layout: TextLayout): SvgExp
         strokeMarkup.push(
           `<path d="${d}" pathLength="1" fill="none" stroke="${paint}" stroke-width="${round(
             spec.width,
-          )}" stroke-linecap="${spec.cap}" style="stroke-dasharray:1;animation:draw-${i} ${total}ms ${EASE_OUT_CUBIC} infinite"/>`,
+          )}" stroke-linecap="${spec.cap}"${
+            spec.opacity !== undefined ? ` stroke-opacity="${spec.opacity}"` : ''
+          } style="stroke-dasharray:1;animation:draw-${i} ${total}ms ${EASE_OUT_CUBIC} infinite"/>`,
         )
       }
     })

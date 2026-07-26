@@ -252,6 +252,18 @@ function drawMarkerStroke(
       passes: 2,
     })
   })
+  // A second, narrower pass inside the first. A highlighter run over paper is never one flat
+  // band — the tip deposits more ink along its centre line, and that density difference is
+  // most of what separates "highlighted" from "a coloured rectangle".
+  ctx.lineWidth = fontSize * 0.46
+  const coreRand = seededRandom(`${phrase.runId}:marker:core`)
+  forEachSweptSegment(phrase, eased, (seg, sweptTo) => {
+    const y = oy + seg.y + fontSize * 0.5
+    sketchLine(ctx, ox + seg.x0 + 1, y, ox + sweptTo - 1, y, 1, coreRand, {
+      roughness: fontSize * 0.06,
+      passes: 1,
+    })
+  })
   ctx.restore()
 }
 
@@ -296,10 +308,21 @@ function drawEmphasisWord(
   ctx.save()
 
   if (preset === 'soft-glow') {
-    ctx.shadowColor = 'rgba(43, 108, 255, 0.85)'
+    // Two layers: a wide dim halo and a tight bright core. A single blur reads as a smudge;
+    // the falloff between two radii is what makes it read as light.
+    const pulse = Math.sin(eased * Math.PI)
+    ctx.save()
+    ctx.shadowColor = 'rgba(43, 108, 255, 0.45)'
     // shadowBlur is specified in device pixels and is NOT scaled by the canvas transform,
     // so a supersampled export would otherwise render a glow at half its intended radius.
-    ctx.shadowBlur = 14 * Math.sin(eased * Math.PI) * pixelScale
+    ctx.shadowBlur = 26 * pulse * pixelScale
+    ctx.fillStyle = TEXT_COLOR
+    ctx.font = `${fontSize}px ${FONT_FAMILY}`
+    ctx.textBaseline = 'alphabetic'
+    ctx.fillText(word.text, x, yBaseline)
+    ctx.restore()
+    ctx.shadowColor = 'rgba(43, 108, 255, 0.9)'
+    ctx.shadowBlur = 11 * pulse * pixelScale
   }
   if (preset === 'burn') {
     // Flicker ramps in with `eased`, then settles into a steady ember glow — the char
@@ -331,6 +354,7 @@ function drawEmphasisWord(
 
   let scale = 1
   let scaleX = 1
+  let rotate = 0
   let fontWeight = ''
   let textColor = TEXT_COLOR
   let skipNormalFill = false
@@ -347,6 +371,9 @@ function drawEmphasisWord(
     const maxGrowthPerSide = spaceWidth * 0.4
     const maxScale = word.width > 0 ? 1 + (2 * maxGrowthPerSide) / word.width : desiredScale
     scale = Math.min(desiredScale, maxScale)
+    // A degree or so of tilt, direction fixed per word. Pure scaling reads mechanical; the
+    // slight rotation is what makes it look like something moved rather than resized.
+    rotate = (seed - 0.5) * 0.05 * Math.sin(Math.min(1, bounceEase) * Math.PI)
   }
   if (preset === 'weight-shift') {
     fontWeight = emphasisProgress < 0.55 ? '700 ' : ''
@@ -402,10 +429,11 @@ function drawEmphasisWord(
   }
 
   if (!skipNormalFill) {
-    if (scale !== 1 || scaleX !== 1) {
+    if (scale !== 1 || scaleX !== 1 || rotate !== 0) {
       const cx = x + word.width / 2
       const cy = yBaseline - fontSize * 0.35
       ctx.translate(cx, cy)
+      if (rotate !== 0) ctx.rotate(rotate)
       ctx.scale(scale * scaleX, scale)
       ctx.translate(-cx, -cy)
     }
@@ -439,6 +467,21 @@ function drawPhraseOverlay(ctx: Ctx2D, phrase: Phrase, ox: number, oy: number, p
       const y = oy + seg.y + fontSize * 0.78 + fontSize * 0.14
       sketchLine(ctx, ox + seg.x0, y, ox + sweptTo, y, 1, rand, { roughness, passes: 2 })
     })
+    // The hand comes back over the line: a thinner, slightly lower repeat that only covers the
+    // middle of the span, which is where a real second pass lands.
+    ctx.save()
+    ctx.lineWidth = stroke * 0.55
+    ctx.globalAlpha = 0.55
+    const backRand = seededRandom(`${phrase.runId}:underline:back`)
+    forEachSweptSegment(phrase, eased, (seg, sweptTo) => {
+      const y = oy + seg.y + fontSize * 0.78 + fontSize * 0.2
+      const inset = (sweptTo - seg.x0) * 0.12
+      sketchLine(ctx, ox + seg.x0 + inset, y, ox + sweptTo - inset, y, 1, backRand, {
+        roughness: roughness * 1.3,
+        passes: 1,
+      })
+    })
+    ctx.restore()
   }
 
   if (preset === 'strike-through') {

@@ -174,6 +174,23 @@ test('hovering an effect shows a live sample of the user’s own word', async ({
   await expect(page.locator('.effect-preview')).toHaveCount(0)
 })
 
+test('Suggest effects matches each phrase and says why', async ({ page }) => {
+  await page.goto('/')
+  await expect(page.locator('.preview-frame canvas').first()).toBeVisible()
+
+  const before = await inkFraction(page)
+  await page.getByRole('button', { name: /Suggest effects/ }).click()
+
+  const status = page.locator('.status')
+  await expect(status).toBeVisible()
+  // The button has to be explicable, not magic: it reports what it matched and why.
+  await expect(status).toContainText(/Matched \d+ phrases?/)
+  await expect(status).toContainText(/—/)
+
+  // Something on the canvas actually changed as a result.
+  await expect.poll(() => inkFraction(page), { timeout: 8000 }).not.toBe(before)
+})
+
 test('the export UI promises only what this browser can actually do', async ({ page }) => {
   await page.goto('/')
   const capability = await page.evaluate(() => {

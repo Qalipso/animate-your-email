@@ -285,6 +285,29 @@
   opacity: 0.6;
 }
 
+/* One button that dresses the whole message at once — the manual picker is for changing its
+   mind afterwards, not for doing all fourteen decisions by hand. */
+.suggest-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.suggest-button {
+  font-size: 14px;
+  padding: 9px 16px;
+  white-space: nowrap;
+}
+
+.suggest-hint {
+  flex: 1 1 200px;
+  min-width: 0;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--muted);
+}
+
 /* ---------- Effect picker ---------- */
 
 /* The same list is used inline (after a drag-selection) and in the right-click menu, so

@@ -24,6 +24,11 @@ underline, circle, box, brackets, strike-through — in the vocabulary
 survives into the GIF. Two sliders set the tempo: **Speed** (0.5×–2×) and **Hold at end**,
 with the resulting loop length shown next to them.
 
+**Suggest effects** dresses the whole message in one click by matching each phrase to what it
+is: a negation gets struck through, a quotation bracketed, a figure circled, a call to action
+highlighted — and it tells you why it chose each one. It is rules over the detector's own
+signals, not a model, so nothing leaves the browser.
+
 **The base text is fully visible in every frame, from the first to the last.** Only the
 effect layer around an emphasized phrase animates. Nothing fades in, blurs, or types itself
 out, because a reader who sees the GIF for one second should still be able to read it.
@@ -86,8 +91,8 @@ cd app && npm install && npm run dev
 |---|---|
 | `npm run lint` | oxlint |
 | `npm run typecheck` | `tsc -b` |
-| `npm run test:unit` | 51 Vitest tests — layout, fitting, spacing, annotation geometry, tempo, SVG, GIF timing |
-| `npm run test:e2e` | 13 Playwright tests against the production build |
+| `npm run test:unit` | 57 Vitest tests — layout, fitting, spacing, annotation geometry, tempo, SVG, GIF timing |
+| `npm run test:e2e` | 14 Playwright tests against the production build |
 | `npm run samples` | regenerates `samples/` from the real app |
 
 CI runs lint, types, unit tests and the browser suite on every push

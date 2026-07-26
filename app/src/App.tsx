@@ -9,6 +9,7 @@ import {
 import { cancelExport, exportDocumentAsGif, exportSceneAsPng, ExportCancelledError } from './engine/exportV2'
 import { exportSceneAsSvg } from './engine/svgExport'
 import { MODE_PRESETS, autoSelectMode } from './engine/modeSelect'
+import { applySuggestions, suggestEmphasis } from './engine/suggest'
 import { contentOffsetY, renderScene, sceneTimingFor } from './engine/render'
 import { PADDING } from './engine/layout'
 import type { AnimatedDocument, EmphasisPresetId, LayoutWord, OutputMode, TextLayout } from './engine/model'
@@ -531,6 +532,35 @@ function App() {
     }
   }
 
+  /**
+   * Matches an effect to what each phrase actually is — a negation gets struck through, a
+   * quotation bracketed, a figure circled. Runs entirely here: the app's promise that nothing
+   * leaves the browser is not worth trading for a model call, and the detector has already
+   * extracted the signals this needs.
+   */
+  function handleSuggest() {
+    if (!doc) return
+    const suggestions = suggestEmphasis(doc)
+    if (suggestions.length === 0) {
+      setStatus({ kind: 'info', text: 'Nothing is animated yet — click a word or drag across a phrase first.' })
+      return
+    }
+    const changed = applySuggestions(doc, suggestions)
+    setVersion((v) => v + 1)
+    if (changed === 0) {
+      setStatus({ kind: 'info', text: 'Every phrase already has the effect that suits it.' })
+      return
+    }
+    const headline = suggestions
+      .slice(0, 2)
+      .map((s) => `“${truncate(s.text, 22)}” — ${s.reason}`)
+      .join('; ')
+    setStatus({
+      kind: 'success',
+      text: `Matched ${changed} ${changed === 1 ? 'phrase' : 'phrases'}: ${headline}${suggestions.length > 2 ? '…' : ''}`,
+    })
+  }
+
   function handleChipToggle(runId: string) {
     if (!doc) return
     toggleRunAnimation(doc, runId)
@@ -834,6 +864,16 @@ function App() {
                 {previewDurationMs !== null && (
                   <span className="slider-readout">Loop runs {(previewDurationMs / 1000).toFixed(1)}s</span>
                 )}
+              </div>
+
+              <div className="suggest-row">
+                <button className="cta-secondary suggest-button" onClick={handleSuggest} disabled={busy}>
+                  ✦ Suggest effects
+                </button>
+                <span className="suggest-hint">
+                  Matches each phrase to what it is — figures get circled, quotes bracketed, negations struck
+                  through. Runs here; nothing is sent anywhere.
+                </span>
               </div>
 
               {effectTarget ? (
