@@ -1,6 +1,6 @@
 import { layoutSceneForRender } from './document'
 import { GIF_FPS, SUPERSAMPLE } from './quality'
-import { computeSceneTiming, renderScene } from './render'
+import { renderScene, sceneTimingFor } from './render'
 import type { GifWorkerResponse } from './gifWorker'
 import type { AnimatedDocument, Scene } from './model'
 
@@ -74,7 +74,7 @@ export function exportDocumentAsGif(
  */
 async function renderSceneSettled(doc: AnimatedDocument, scene: Scene): Promise<OffscreenCanvas> {
   const layout = await layoutSceneForRender(doc, scene)
-  const timing = computeSceneTiming(layout)
+  const timing = sceneTimingFor(doc, layout)
 
   const hiCanvas = new OffscreenCanvas(doc.width * SUPERSAMPLE, doc.height * SUPERSAMPLE)
   const hiCtx = hiCanvas.getContext('2d') as OffscreenCanvasRenderingContext2D

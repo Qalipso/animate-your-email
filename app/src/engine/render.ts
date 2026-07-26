@@ -1,5 +1,7 @@
 import { easeOutBack, easeOutCubic } from './easing'
+import { seededRandom, sketchEllipse, sketchLine, sketchRect } from './sketch'
 import { FONT_FAMILY, PADDING, type Ctx2D } from './layout'
+import { DEFAULT_HOLD_MS } from './model'
 import type { AnimatedDocument, EmphasisPresetId, LayoutWord, TextLayout } from './model'
 
 // Lead-in hold before the first emphasis fires. The base text is fully readable from
@@ -12,15 +14,23 @@ const EMPHASIS_DURATION_MS = 900
 // start is the previous phrase's end, so "in order" isn't just visual (reading order via
 // animatedIndex) but also temporal.
 const EMPHASIS_STAGGER_MS = EMPHASIS_DURATION_MS
-const HOLD_AFTER_MS = 800
 
 const TEXT_COLOR = '#1a1a1a'
+
+/** Ink colours for the hand-drawn annotation family. */
+const INK_MARKER = 'rgba(255, 214, 79, 0.62)'
+const INK_BOW = 'rgba(255, 133, 178, 0.45)'
+const INK_BLUE = '#2b6cff'
+const INK_RED = '#e0463a'
 
 export interface SceneTiming {
   entranceMs: number
   emphasisStartMs: number
   emphasisEndMs: number
   totalMs: number
+  /** Speed-scaled per-phrase values, so nothing downstream has to re-apply the tempo. */
+  phraseDurationMs: number
+  phraseStaggerMs: number
 }
 
 function clamp01(t: number): number {
@@ -40,17 +50,41 @@ export function contentOffsetY(doc: AnimatedDocument, layout: TextLayout): numbe
   return PADDING + spare / 2
 }
 
-export function computeSceneTiming(layout: TextLayout): SceneTiming {
+export interface TimingOptions {
+  /** Tempo multiplier; 2 halves every duration. */
+  speed?: number
+  /** Hold on the settled frame before the loop restarts, in ms at speed 1. */
+  holdMs?: number
+}
+
+/**
+ * Scene timing. `speed` scales the lead-in, each phrase, and the hold together, so the
+ * animation keeps its proportions at any tempo rather than only the emphasis getting faster.
+ * Callers pass the document's own values so preview and export can never disagree.
+ */
+export function computeSceneTiming(layout: TextLayout, options: TimingOptions = {}): SceneTiming {
+  const speed = options.speed && options.speed > 0 ? options.speed : 1
+  const hold = Math.max(0, options.holdMs ?? DEFAULT_HOLD_MS)
+
   const phraseCount = new Set(
     layout.lines.flatMap((l) => l.words).filter((w) => w.highlight?.animated).map((w) => w.runId),
   ).size
-  const emphasisSpan = phraseCount > 0 ? (phraseCount - 1) * EMPHASIS_STAGGER_MS + EMPHASIS_DURATION_MS : 0
+  const leadIn = LEAD_IN_MS / speed
+  const emphasisSpan =
+    phraseCount > 0 ? ((phraseCount - 1) * EMPHASIS_STAGGER_MS + EMPHASIS_DURATION_MS) / speed : 0
   return {
-    entranceMs: LEAD_IN_MS,
-    emphasisStartMs: LEAD_IN_MS,
-    emphasisEndMs: LEAD_IN_MS + emphasisSpan,
-    totalMs: LEAD_IN_MS + emphasisSpan + HOLD_AFTER_MS,
+    entranceMs: leadIn,
+    emphasisStartMs: leadIn,
+    emphasisEndMs: leadIn + emphasisSpan,
+    totalMs: leadIn + emphasisSpan + hold / speed,
+    phraseDurationMs: EMPHASIS_DURATION_MS / speed,
+    phraseStaggerMs: EMPHASIS_STAGGER_MS / speed,
   }
+}
+
+/** Timing derived straight from a document — the form both the preview and the worker use. */
+export function sceneTimingFor(doc: AnimatedDocument, layout: TextLayout): SceneTiming {
+  return computeSceneTiming(layout, { speed: doc.speed, holdMs: doc.holdMs })
 }
 
 // ---------------------------------------------------------------------------
@@ -126,8 +160,8 @@ function buildPhrases(layout: TextLayout): Phrase[] {
 }
 
 function phraseProgress(phrase: Phrase, tMs: number, timing: SceneTiming): number {
-  const start = timing.emphasisStartMs + phrase.animatedIndex * EMPHASIS_STAGGER_MS
-  return clamp01((tMs - start) / EMPHASIS_DURATION_MS)
+  const start = timing.emphasisStartMs + phrase.animatedIndex * timing.phraseStaggerMs
+  return clamp01((tMs - start) / timing.phraseDurationMs)
 }
 
 /** Calls `draw` for the portion of each segment covered by a left-to-right sweep at `progress`. */
@@ -164,19 +198,40 @@ function hashSeed(s: string): number {
 // unambiguously a background, which is what a marker pen actually looks like.
 // ---------------------------------------------------------------------------
 
-const MARKER_FILL = 'rgba(255, 214, 79, 0.55)'
-const BOW_FILL = 'rgba(255, 133, 178, 0.42)'
-
-function drawPhraseUnderlay(ctx: Ctx2D, phrase: Phrase, ox: number, oy: number, progress: number, fontSize: number) {
-  const fill = phrase.preset === 'marker-highlight' ? MARKER_FILL : phrase.preset === 'bow-highlight' ? BOW_FILL : null
-  if (!fill) return
-  const eased = easeOutCubic(progress)
+/**
+ * A marker stroke, not a rectangle: a thick round-capped line laid down along the phrase, with
+ * the slight bow and double-pass of a real highlighter. The old flat `fillRect` was the single
+ * most machine-looking thing on screen.
+ */
+function drawMarkerStroke(
+  ctx: Ctx2D,
+  phrase: Phrase,
+  ox: number,
+  oy: number,
+  eased: number,
+  fontSize: number,
+  colour: string,
+) {
+  const rand = seededRandom(`${phrase.runId}:marker`)
   ctx.save()
-  ctx.fillStyle = fill
+  ctx.strokeStyle = colour
+  ctx.lineCap = 'round'
+  ctx.lineJoin = 'round'
+  ctx.lineWidth = fontSize * 0.82
   forEachSweptSegment(phrase, eased, (seg, sweptTo) => {
-    ctx.fillRect(ox + seg.x0 - 2, oy + seg.y + fontSize * 0.12, sweptTo - seg.x0 + 4, fontSize * 0.86)
+    const y = oy + seg.y + fontSize * 0.53
+    sketchLine(ctx, ox + seg.x0 - 1, y, ox + sweptTo + 1, y, 1, rand, {
+      roughness: fontSize * 0.045,
+      passes: 2,
+    })
   })
   ctx.restore()
+}
+
+function drawPhraseUnderlay(ctx: Ctx2D, phrase: Phrase, ox: number, oy: number, progress: number, fontSize: number) {
+  const eased = easeOutCubic(progress)
+  if (phrase.preset === 'marker-highlight') drawMarkerStroke(ctx, phrase, ox, oy, eased, fontSize, INK_MARKER)
+  if (phrase.preset === 'bow-highlight') drawMarkerStroke(ctx, phrase, ox, oy, eased, fontSize, INK_BOW)
 }
 
 // ---------------------------------------------------------------------------
@@ -341,18 +396,93 @@ function drawPhraseOverlay(ctx: Ctx2D, phrase: Phrase, ox: number, oy: number, p
   const preset = phrase.preset
   ctx.save()
 
+  const eased = easeOutCubic(progress)
+  const rand = seededRandom(`${phrase.runId}:${preset}`)
+  const stroke = Math.max(2, fontSize * 0.055)
+  const roughness = fontSize * 0.05
+
   if (preset === 'underline-draw') {
-    ctx.strokeStyle = '#2b6cff'
-    ctx.lineWidth = Math.max(2, fontSize * 0.06)
+    // Two passes that don't quite agree, the way an underline drawn by hand doubles back.
+    ctx.strokeStyle = INK_BLUE
+    ctx.lineWidth = stroke
     ctx.lineCap = 'round'
-    const eased = easeOutCubic(progress)
     forEachSweptSegment(phrase, eased, (seg, sweptTo) => {
-      const y = oy + seg.y + fontSize * 0.78 + 4
-      ctx.beginPath()
-      ctx.moveTo(ox + seg.x0, y)
-      ctx.lineTo(ox + sweptTo, y)
-      ctx.stroke()
+      const y = oy + seg.y + fontSize * 0.78 + fontSize * 0.14
+      sketchLine(ctx, ox + seg.x0, y, ox + sweptTo, y, 1, rand, { roughness, passes: 2 })
     })
+  }
+
+  if (preset === 'strike-through') {
+    ctx.strokeStyle = INK_RED
+    ctx.lineWidth = stroke
+    ctx.lineCap = 'round'
+    forEachSweptSegment(phrase, eased, (seg, sweptTo) => {
+      const y = oy + seg.y + fontSize * 0.52
+      sketchLine(ctx, ox + seg.x0, y, ox + sweptTo, y, 1, rand, { roughness, passes: 2 })
+    })
+  }
+
+  if (preset === 'circle-annotation') {
+    // One loop per line the phrase occupies; a single ellipse round a phrase that wrapped
+    // would swallow the lines in between.
+    ctx.strokeStyle = INK_RED
+    ctx.lineWidth = stroke
+    ctx.lineCap = 'round'
+    for (const seg of phrase.segments) {
+      const w = seg.x1 - seg.x0
+      const cx = ox + seg.x0 + w / 2
+      const cy = oy + seg.y + fontSize * 0.5
+      sketchEllipse(ctx, cx, cy, w / 2 + fontSize * 0.28, fontSize * 0.66, eased, rand, {
+        roughness: roughness * 1.4,
+        passes: 2,
+      })
+    }
+  }
+
+  if (preset === 'box-annotation') {
+    ctx.strokeStyle = INK_BLUE
+    ctx.lineWidth = stroke
+    ctx.lineCap = 'round'
+    for (const seg of phrase.segments) {
+      const padX = fontSize * 0.24
+      const padY = fontSize * 0.1
+      sketchRect(
+        ctx,
+        ox + seg.x0 - padX,
+        oy + seg.y - padY,
+        seg.x1 - seg.x0 + padX * 2,
+        fontSize * 1.05 + padY,
+        eased,
+        rand,
+        // Straight edges hide the wobble that curves show off, so a box needs more of it
+        // before it stops reading as a plain rectangle.
+        { roughness: roughness * 1.9, passes: 2 },
+      )
+    }
+  }
+
+  if (preset === 'bracket') {
+    // Both brackets grow from the middle of their own stroke outwards, so the phrase reads as
+    // being taken hold of rather than fenced in.
+    ctx.strokeStyle = INK_BLUE
+    ctx.lineWidth = stroke
+    ctx.lineCap = 'round'
+    for (const seg of phrase.segments) {
+      const top = oy + seg.y + fontSize * 0.04
+      const bottom = top + fontSize * 0.98
+      const arm = fontSize * 0.22
+      // Clear of the neighbouring words: at 0.18em the bracket collided with the word before it.
+      const left = ox + seg.x0 - fontSize * 0.34
+      const right = ox + seg.x1 + fontSize * 0.34
+      for (const [x, dir] of [
+        [left, 1],
+        [right, -1],
+      ] as [number, number][]) {
+        sketchLine(ctx, x, top, x, bottom, eased, rand, { roughness, passes: 2 })
+        sketchLine(ctx, x, top, x + arm * dir, top, eased, rand, { roughness, passes: 1 })
+        sketchLine(ctx, x, bottom, x + arm * dir, bottom, eased, rand, { roughness, passes: 1 })
+      }
+    }
   }
 
   if (preset === 'shimmer' && progress < 1) {
@@ -395,7 +525,6 @@ function drawPhraseOverlay(ctx: Ctx2D, phrase: Phrase, ox: number, oy: number, p
   }
 
   if (preset === 'bow-highlight') {
-    const eased = easeOutCubic(progress)
     if (eased > 0.3) {
       // One bow at the end of the phrase — not one per word. Kept small and anchored
       // within the last word's own line-box headroom so it can't collide with the line above.

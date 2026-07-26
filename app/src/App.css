@@ -488,90 +488,48 @@
   align-self: flex-start;
 }
 
-/* ---------- Advanced ---------- */
+/* ---------- Tempo ---------- */
 
-.customize {
-  border-top: 1px solid var(--border);
-  padding-top: 14px;
+.sliders {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 10px 16px;
+  align-items: end;
 }
 
-.customize summary {
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--muted);
-  cursor: pointer;
-  list-style: none;
-}
-
-.customize summary::-webkit-details-marker {
-  display: none;
-}
-
-.customize summary::after {
-  content: ' ▾';
-}
-
-.customize[open] summary::after {
-  content: ' ▴';
-}
-
-.customize-body {
-  margin-top: 14px;
+.slider {
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: 4px;
+  min-width: 0;
 }
 
-.select-field {
+.slider-label {
   display: flex;
-  flex-direction: column;
-  gap: 6px;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
   font-size: 12px;
-  font-weight: 600;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
   color: var(--muted);
 }
 
-.select-field select {
-  font: inherit;
-  font-size: 14px;
-  font-weight: 400;
-  letter-spacing: normal;
-  text-transform: none;
-  padding: 8px 10px;
-  border: 1px solid var(--border-strong);
-  border-radius: var(--radius-sm);
-  background: var(--surface);
+.slider-label output {
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
   color: var(--text-h);
 }
 
-.chip-row {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
+.slider input[type='range'] {
+  width: 100%;
+  accent-color: var(--accent);
+  margin: 0;
 }
 
-.chip {
-  font: inherit;
-  font-size: 13px;
-  padding: 5px 12px;
-  border: 1px solid var(--border-strong);
-  border-radius: 999px;
-  background: var(--surface);
+.slider-readout {
+  grid-column: 1 / -1;
+  font-size: 12px;
   color: var(--muted);
-  cursor: pointer;
-  max-width: 100%;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.chip-on {
-  border-color: var(--accent);
-  background: var(--accent-soft);
-  color: var(--accent);
-  font-weight: 600;
+  font-variant-numeric: tabular-nums;
 }
 
 /* ---------- Status ---------- */

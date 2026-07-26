@@ -1,11 +1,21 @@
 import { describe, expect, it } from 'vitest'
 import { buildAnimatedDocument, layoutSceneForRender, toggleRunAnimation } from '../engine/document'
 import { detectHighlights } from '../engine/highlight'
-import { createMeasurer, metricsFor, wrapBlocksIntoLines } from '../engine/layout'
-import { computeSceneTiming, renderScene } from '../engine/render'
+import { PADDING, createMeasurer, metricsFor, wrapBlocksIntoLines } from '../engine/layout'
+import { computeSceneTiming, renderScene, sceneTimingFor } from '../engine/render'
+import { seededRandom } from '../engine/sketch'
 import { buildTimeline, renderTimelineFrame } from '../engine/timeline'
 import { snapDelayMs } from '../gifExport'
-import { MAX_CHARACTERS, MAX_FRAME_HEIGHT, MIN_READABLE_FONT_PX, type TextLayout } from '../engine/model'
+import {
+  MAX_CHARACTERS,
+  MAX_FRAME_HEIGHT,
+  MAX_HOLD_MS,
+  MAX_SPEED,
+  MIN_HOLD_MS,
+  MIN_READABLE_FONT_PX,
+  MIN_SPEED,
+  type TextLayout,
+} from '../engine/model'
 import { MODE_PRESETS } from '../engine/modeSelect'
 import { MockCanvas, type MockCanvasContext } from './mockCanvas'
 
@@ -260,21 +270,129 @@ describe('phrase-level emphasis geometry', () => {
     const timing = computeSceneTiming(layout)
     renderScene(ctx as never, doc, layout, timing.emphasisEndMs, timing)
 
-    // Everything except the white page fill; at full progress that is the highlight band.
-    const bands = ctx.rects.filter((r) => r.fillStyle !== '#ffffff')
+    // The marker is a thick round-capped stroke, so assert on the strokes it laid down.
+    const marker = ctx.strokes.filter((s) => s.lineWidth > doc.fontSize * 0.5)
+    expect(marker.length).toBeGreaterThan(0)
 
-    // One band per line the phrase occupies — the regression being guarded against is one
-    // band per *word*, which leaves an unpainted gap at every word space.
     const linesCovered = layout.lines.filter((l) => l.words.some((w) => w.highlight?.animated))
-    expect(bands.length).toBe(linesCovered.length)
-    expect(bands.length).toBeLessThan(phraseWords.length)
 
+    // The regression guarded against is one stroke per *word*, which leaves the phrase
+    // striped with unpainted gaps at every word space. Every marker stroke must therefore
+    // span its whole line's worth of the phrase, and none may be word-sized.
     for (const line of linesCovered) {
       const inLine = line.words.filter((w) => w.highlight?.animated)
-      const expectedWidth = Math.max(...inLine.map((w) => w.x + w.width)) - Math.min(...inLine.map((w) => w.x)) + 4
-      expect(bands.some((b) => Math.abs(b.w - expectedWidth) < 0.001)).toBe(true)
+      // Strokes are in canvas space; layout words are not.
+      const spanStart = PADDING + Math.min(...inLine.map((w) => w.x))
+      const spanEnd = PADDING + Math.max(...inLine.map((w) => w.x + w.width))
+      const covering = marker.filter((s) => s.minX <= spanStart + 3 && s.maxX >= spanEnd - 3)
+      expect(covering.length).toBeGreaterThan(0)
+    }
+
+    const widestWord = Math.max(...phraseWords.map((w) => w.width))
+    for (const stroke of marker) {
+      expect(stroke.maxX - stroke.minX).toBeGreaterThan(widestWord)
     }
   })
+})
+
+describe('tempo controls', () => {
+  it('scales every part of the animation together, not just the emphasis', async () => {
+    const doc = await buildAnimatedDocument('We shipped [[three major updates]] this quarter, finally.', {
+      mode: 'paragraph',
+      modeIsOverridden: true,
+    })
+    const layout = await layoutSceneForRender(doc, doc.scenes[0])
+
+    const base = computeSceneTiming(layout, { speed: 1, holdMs: 800 })
+    const fast = computeSceneTiming(layout, { speed: 2, holdMs: 800 })
+
+    expect(fast.totalMs).toBeCloseTo(base.totalMs / 2, 5)
+    expect(fast.entranceMs).toBeCloseTo(base.entranceMs / 2, 5)
+    expect(fast.phraseDurationMs).toBeCloseTo(base.phraseDurationMs / 2, 5)
+    expect(fast.phraseStaggerMs).toBeCloseTo(base.phraseStaggerMs / 2, 5)
+  })
+
+  it('adds the hold to the end of the loop without touching the animation itself', async () => {
+    const doc = await buildAnimatedDocument('Thank you for the *great work* today!', {
+      mode: 'one-card',
+      modeIsOverridden: true,
+    })
+    const layout = await layoutSceneForRender(doc, doc.scenes[0])
+
+    const short = computeSceneTiming(layout, { speed: 1, holdMs: 0 })
+    const long = computeSceneTiming(layout, { speed: 1, holdMs: 1000 })
+
+    expect(long.totalMs - short.totalMs).toBeCloseTo(1000, 5)
+    expect(long.emphasisEndMs).toBeCloseTo(short.emphasisEndMs, 5)
+  })
+
+  it('clamps tempo into range on the document, since that is what the export worker receives', async () => {
+    const wild = await buildAnimatedDocument('Short note.', {
+      mode: 'one-card',
+      modeIsOverridden: true,
+      speed: 99,
+      holdMs: -500,
+    })
+    expect(wild.speed).toBe(MAX_SPEED)
+    expect(wild.holdMs).toBe(MIN_HOLD_MS)
+
+    const slow = await buildAnimatedDocument('Short note.', {
+      mode: 'one-card',
+      modeIsOverridden: true,
+      speed: 0.01,
+      holdMs: 99_999,
+    })
+    expect(slow.speed).toBe(MIN_SPEED)
+    expect(slow.holdMs).toBe(MAX_HOLD_MS)
+  })
+})
+
+describe('hand-drawn annotations', () => {
+  it('produces identical strokes for the same seed and different ones otherwise', () => {
+    const a = seededRandom('phrase-1')
+    const b = seededRandom('phrase-1')
+    const c = seededRandom('phrase-2')
+    const seqA = Array.from({ length: 8 }, () => a())
+    const seqB = Array.from({ length: 8 }, () => b())
+    const seqC = Array.from({ length: 8 }, () => c())
+    // Determinism is not cosmetic here: preview and export must render byte-identical frames.
+    expect(seqA).toEqual(seqB)
+    expect(seqA).not.toEqual(seqC)
+    for (const v of seqA) {
+      expect(v).toBeGreaterThanOrEqual(0)
+      expect(v).toBeLessThan(1)
+    }
+  })
+
+  it.each(['circle-annotation', 'box-annotation', 'bracket', 'strike-through'] as const)(
+    'draws %s without disturbing the always-visible base text',
+    async (preset) => {
+      const doc = await buildAnimatedDocument('We shipped [[three major updates]] this quarter, finally.', {
+        mode: 'paragraph',
+        modeIsOverridden: true,
+      })
+      for (const scene of doc.scenes) {
+        for (const block of scene.blocks) {
+          for (const run of block.runs) {
+            if (run.highlight && run.highlight.kind !== 'content-word') {
+              run.highlight.animated = true
+              run.highlight.emphasisPreset = preset
+            }
+          }
+        }
+      }
+      const layout = await layoutSceneForRender(doc, doc.scenes[0])
+      const timing = sceneTimingFor(doc, layout)
+
+      const canvas = new MockCanvas(doc.width, doc.height)
+      const ctx = canvas.getContext() as unknown as MockCanvasContext
+      expect(() => renderScene(ctx as never, doc, layout, timing.emphasisEndMs, timing)).not.toThrow()
+
+      // These presets are strokes, not fills: the only rect on the canvas is the white page.
+      const fills = ctx.rects.filter((r) => r.fillStyle !== '#ffffff')
+      expect(fills).toHaveLength(0)
+    },
+  )
 })
 
 describe('GIF frame timing', () => {

@@ -8,10 +8,18 @@ import {
 } from './engine/document'
 import { cancelExport, exportDocumentAsGif, exportSceneAsPng, ExportCancelledError } from './engine/exportV2'
 import { MODE_PRESETS, autoSelectMode } from './engine/modeSelect'
-import { computeSceneTiming, contentOffsetY, renderScene } from './engine/render'
+import { contentOffsetY, renderScene, sceneTimingFor } from './engine/render'
 import { PADDING } from './engine/layout'
 import type { AnimatedDocument, EmphasisPresetId, LayoutWord, OutputMode, TextLayout } from './engine/model'
-import { MAX_CHARACTERS } from './engine/model'
+import {
+  DEFAULT_HOLD_MS,
+  DEFAULT_SPEED,
+  MAX_CHARACTERS,
+  MAX_HOLD_MS,
+  MAX_SPEED,
+  MIN_HOLD_MS,
+  MIN_SPEED,
+} from './engine/model'
 import './App.css'
 
 const GENERATE_DEBOUNCE_MS = 400
@@ -47,6 +55,10 @@ const EMPHASIS_OPTIONS: { id: EmphasisPresetId; name: string; swatch: string }[]
   { id: 'wash-away', name: 'Wash Away', swatch: '#789ab0' },
   { id: 'bow-highlight', name: 'Pink Highlight + Bow', swatch: '#ff85b2' },
   { id: 'glitch', name: 'Glitch', swatch: '#3cdcff' },
+  { id: 'circle-annotation', name: 'Circle It', swatch: '#e0463a' },
+  { id: 'box-annotation', name: 'Box It', swatch: '#2b6cff' },
+  { id: 'bracket', name: 'Brackets', swatch: '#2b6cff' },
+  { id: 'strike-through', name: 'Strike Through', swatch: '#e0463a' },
 ]
 
 type StatusKind = 'info' | 'success' | 'error'
@@ -153,6 +165,8 @@ function App() {
   const [effectTarget, setEffectTarget] = useState<EffectTarget | null>(null)
   const [isLooping, setIsLooping] = useState(() => !prefersReducedMotion())
   const [clipboard] = useState(detectClipboardCapability)
+  const [speed, setSpeed] = useState(DEFAULT_SPEED)
+  const [holdMs, setHoldMs] = useState(DEFAULT_HOLD_MS)
   const [replayNonce, setReplayNonce] = useState(0)
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null)
 
@@ -171,6 +185,13 @@ function App() {
   // Guards against an in-flight generation from an earlier (superseded) text/template
   // change resolving after a newer one and clobbering it with stale content.
   const generationIdRef = useRef(0)
+  // Read by the (deliberately un-debounced-on-tempo) build effect so a rebuild triggered by a
+  // text or template change picks up the current slider values without the sliders themselves
+  // being build dependencies — see handleSpeedChange.
+  const speedRef = useRef(speed)
+  const holdRef = useRef(holdMs)
+  speedRef.current = speed
+  holdRef.current = holdMs
 
   const effectiveMode = modeOverride ?? autoSelectMode(rawText)
   // Documents are always a single frame — everything the user pasted has to be readable at
@@ -202,6 +223,8 @@ function App() {
       buildAnimatedDocument(rawText, {
         mode: effectiveMode,
         modeIsOverridden: modeOverride !== null,
+        speed: speedRef.current,
+        holdMs: holdRef.current,
       }).then((built) => {
         if (generationIdRef.current !== genId) return // superseded by a newer change
         setDoc(built)
@@ -259,7 +282,7 @@ function App() {
   }, [])
 
   // Live preview: play the current scene's animation, driven by the exact same
-  // renderScene()/computeSceneTiming() used for export.
+  // renderScene()/sceneTimingFor() used for export.
   useEffect(() => {
     const canvas = canvasRef.current
     if (!canvas || !doc || !scene || !layout) return
@@ -267,7 +290,7 @@ function App() {
     const ctx = prepareCanvas(canvas, doc.width, doc.height, dpr)
     if (!ctx) return
 
-    const timing = computeSceneTiming(layout)
+    const timing = sceneTimingFor(doc, layout)
     const loopMs = timing.totalMs + LOOP_PAUSE_MS
     let start = performance.now()
 
@@ -461,6 +484,28 @@ function App() {
     clearTargeting()
   }
 
+  /**
+   * Tempo is applied to the existing document rather than triggering a rebuild.
+   * buildAnimatedDocument re-runs highlight detection from scratch, which would throw away
+   * every word the user toggled and every effect they picked — an unacceptable thing for a
+   * slider to do. Mutate-and-bump-version is the same path the word toggles already use.
+   */
+  function handleSpeedChange(next: number) {
+    setSpeed(next)
+    if (doc) {
+      doc.speed = next
+      setVersion((v) => v + 1)
+    }
+  }
+
+  function handleHoldChange(next: number) {
+    setHoldMs(next)
+    if (doc) {
+      doc.holdMs = next
+      setVersion((v) => v + 1)
+    }
+  }
+
   function handleChipToggle(runId: string) {
     if (!doc) return
     toggleRunAnimation(doc, runId)
@@ -549,6 +594,13 @@ function App() {
 
   const busy = isCopying || isExporting
   const nearCharLimit = rawText.length > MAX_CHARACTERS * 0.9
+  // Shown next to the sliders so the tempo choice is tied to the number that actually
+  // matters: how long the exported loop will be.
+  const previewDurationMs = useMemo(
+    () => (doc && layout ? sceneTimingFor(doc, layout).totalMs : null),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [doc, layout, version],
+  )
 
   const effectPicker = (onPick: (id: EmphasisPresetId) => void) =>
     EMPHASIS_OPTIONS.map((o) => (
@@ -618,30 +670,26 @@ function App() {
             )}
           </div>
 
-          <details className="customize">
-            <summary>Advanced</summary>
-            <div className="customize-body">
-              {animatedRuns.length > 0 && (
-                <div className="field">
-                  <span className="field-label">Animated phrases</span>
-                  <div className="chip-row">
-                    {animatedRuns.map((r) => (
-                      <button
-                        key={r.id}
-                        type="button"
-                        aria-pressed={r.highlight!.animated}
-                        className={r.highlight!.animated ? 'chip chip-on' : 'chip'}
-                        onClick={() => handleChipToggle(r.id)}
-                        title={`Detected as: ${r.highlight!.kind}`}
-                      >
-                        {r.text}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              )}
+          {animatedRuns.length > 0 && (
+            <div className="field">
+              <span className="field-label">Animated phrases</span>
+              <div className="chip-row">
+                {animatedRuns.map((r) => (
+                  <button
+                    key={r.id}
+                    type="button"
+                    aria-pressed={r.highlight!.animated}
+                    className={r.highlight!.animated ? 'chip chip-on' : 'chip'}
+                    onClick={() => handleChipToggle(r.id)}
+                    title={`Detected as: ${r.highlight!.kind}`}
+                  >
+                    {r.text}
+                  </button>
+                ))}
+              </div>
+              <span className="field-hint">Tap one to stop it animating.</span>
             </div>
-          </details>
+          )}
         </section>
 
         <section className="panel preview-panel" aria-label="Preview">
@@ -677,6 +725,43 @@ function App() {
                     Loop
                   </label>
                 </div>
+              </div>
+
+              {/* Tempo lives next to the preview, not behind a disclosure: it changes what you
+                  are looking at, and the total duration it produces is what decides whether the
+                  GIF is email-friendly. */}
+              <div className="sliders">
+                <label className="slider">
+                  <span className="slider-label">
+                    Speed <output>{speed.toFixed(1)}×</output>
+                  </span>
+                  <input
+                    type="range"
+                    aria-label="Speed"
+                    min={MIN_SPEED}
+                    max={MAX_SPEED}
+                    step={0.1}
+                    value={speed}
+                    onChange={(e) => handleSpeedChange(Number(e.target.value))}
+                  />
+                </label>
+                <label className="slider">
+                  <span className="slider-label">
+                    Hold at end <output>{(holdMs / 1000).toFixed(1)}s</output>
+                  </span>
+                  <input
+                    type="range"
+                    aria-label="Hold at end"
+                    min={MIN_HOLD_MS}
+                    max={MAX_HOLD_MS}
+                    step={100}
+                    value={holdMs}
+                    onChange={(e) => handleHoldChange(Number(e.target.value))}
+                  />
+                </label>
+                {previewDurationMs !== null && (
+                  <span className="slider-readout">Loop runs {(previewDurationMs / 1000).toFixed(1)}s</span>
+                )}
               </div>
 
               {effectTarget ? (

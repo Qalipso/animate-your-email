@@ -20,7 +20,18 @@ import type {
   TextRun,
   TransitionPresetId,
 } from './model'
-import { MAX_ANIMATED_PHRASES_PER_SCENE, MAX_CHARACTERS, MAX_FRAME_HEIGHT, MIN_READABLE_FONT_PX } from './model'
+import {
+  DEFAULT_HOLD_MS,
+  DEFAULT_SPEED,
+  MAX_ANIMATED_PHRASES_PER_SCENE,
+  MAX_CHARACTERS,
+  MAX_FRAME_HEIGHT,
+  MAX_HOLD_MS,
+  MAX_SPEED,
+  MIN_HOLD_MS,
+  MIN_READABLE_FONT_PX,
+  MIN_SPEED,
+} from './model'
 
 let idCounter = 0
 function nextId(prefix: string): string {
@@ -84,6 +95,14 @@ export interface BuildDocumentOptions {
   modeIsOverridden: boolean
   entrance?: EntrancePresetId
   transition?: TransitionPresetId
+  /** Tempo multiplier; clamped to [MIN_SPEED, MAX_SPEED]. */
+  speed?: number
+  /** Hold on the settled frame, in ms; clamped to [MIN_HOLD_MS, MAX_HOLD_MS]. */
+  holdMs?: number
+}
+
+function clamp(value: number, min: number, max: number): number {
+  return Math.min(max, Math.max(min, value))
 }
 
 interface FitResult {
@@ -170,6 +189,11 @@ export async function buildAnimatedDocument(rawTextInput: string, options: Build
     fontSize: fit.fontSize,
     width: preset.width,
     height,
+    // Clamped here rather than trusted from the caller: the document is what the export
+    // worker receives, so an out-of-range speed would produce a GIF nobody could reproduce
+    // from the UI.
+    speed: clamp(options.speed ?? DEFAULT_SPEED, MIN_SPEED, MAX_SPEED),
+    holdMs: clamp(options.holdMs ?? DEFAULT_HOLD_MS, MIN_HOLD_MS, MAX_HOLD_MS),
   }
 }
 

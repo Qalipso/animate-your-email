@@ -1,5 +1,5 @@
 import { layoutSceneForRender } from './document'
-import { renderScene, computeSceneTiming, type SceneTiming } from './render'
+import { renderScene, sceneTimingFor, type SceneTiming } from './render'
 import type { Ctx2D } from './layout'
 import type { AnimatedDocument, Scene, TextLayout, TransitionPresetId } from './model'
 
@@ -38,7 +38,7 @@ export async function buildTimeline(doc: AnimatedDocument): Promise<Timeline> {
   const segments: Segment[] = []
   let cursor = 0
   const layouts = await Promise.all(doc.scenes.map((s) => layoutSceneForRender(doc, s)))
-  const timings = layouts.map((l) => computeSceneTiming(l))
+  const timings = layouts.map((l) => sceneTimingFor(doc, l))
 
   doc.scenes.forEach((scene, i) => {
     const timing = timings[i]
@@ -109,7 +109,14 @@ export function renderTimelineFrame(
   ctxB.scale(pixelScale, pixelScale)
 
   // Outgoing scene: freeze on its final settled frame.
-  const fromTimingFinal = { entranceMs: 0, emphasisStartMs: 0, emphasisEndMs: 0, totalMs: 0 }
+  const fromTimingFinal: SceneTiming = {
+    entranceMs: 0,
+    emphasisStartMs: 0,
+    emphasisEndMs: 0,
+    totalMs: 0,
+    phraseDurationMs: 1,
+    phraseStaggerMs: 0,
+  }
   renderScene(ctxA, doc, seg.fromLayout, 1_000_000, fromTimingFinal, 0, 0, pixelScale)
   // Incoming scene: plays its own lead-in starting at t=0 through the transition window.
   renderScene(ctxB, doc, seg.toLayout, progress * TRANSITION_MS, seg.toTiming, 0, 0, pixelScale)

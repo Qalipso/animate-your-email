@@ -1,5 +1,8 @@
 import { expect, test } from '@playwright/test'
 
+/** Every emphasis preset offered in the picker; kept in one place so adding one fails loudly. */
+const EFFECT_COUNT = 14
+
 const LONG_TEXT = Array.from(
   { length: 9 },
   (_, i) =>
@@ -74,7 +77,7 @@ test('the text fits without the page scrolling sideways, on mobile too', async (
 
 test('clicking a word toggles whether it animates', async ({ page }) => {
   await page.goto('/')
-  await page.locator('.customize summary').click()
+  // The phrase chips are on the page directly now — there is no "Advanced" disclosure.
   const chips = page.locator('.chip')
   await expect(chips.first()).toBeVisible()
 
@@ -99,7 +102,7 @@ test('dragging across a phrase offers the effect picker and applies a choice', a
 
   const bar = page.locator('.effect-bar')
   await expect(bar).toBeVisible()
-  await expect(bar.locator('.effect-option')).toHaveCount(10)
+  await expect(bar.locator('.effect-option')).toHaveCount(EFFECT_COUNT)
 
   await bar.locator('.effect-option', { hasText: 'Burn' }).click()
   await expect(bar).toBeHidden()
