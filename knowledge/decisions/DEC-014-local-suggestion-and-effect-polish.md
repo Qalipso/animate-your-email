@@ -66,6 +66,19 @@ proves the mirroring is correct, and it was re-run after the change.
   canvas actually changed.
 - The SVG/raster zero-diff test still passes, confirming the polish reached both backends.
 
+## 3. Three more marks
+
+`squiggle` (proofreader's wavy underline), `arrow` (points at the phrase from below), and
+`corner-marks` (crop marks around it — the only mark here that never touches the words).
+
+The arrow is drawn **once per phrase, under its last line**. The first version drew one per
+line segment, which put a shaft straight through the words of anything that wrapped — caught
+by looking at the render, not by a test.
+
+All three are in the hand-drawn family, so they share geometry with the canvas renderer and
+appear in the SVG export too. `sketchWavePaths` is new: wavelength fixed in px, so a long
+phrase gets more waves rather than longer ones, which is how a hand draws it.
+
 ## Known gaps
 
 - The cues are English-only. Russian or other input falls through to the category rules, which

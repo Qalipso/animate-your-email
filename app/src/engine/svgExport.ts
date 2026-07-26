@@ -9,7 +9,7 @@ import {
   sceneTimingFor,
   type Phrase,
 } from './render'
-import { seededRandom, sketchEllipsePaths, sketchLinePaths, sketchRectPaths } from './sketch'
+import { seededRandom, sketchEllipsePaths, sketchLinePaths, sketchRectPaths, sketchWavePaths } from './sketch'
 import type { AnimatedDocument, EmphasisPresetId, Scene, TextLayout } from './model'
 
 /**
@@ -39,6 +39,9 @@ const ANIMATABLE_IN_SVG: ReadonlySet<EmphasisPresetId> = new Set<EmphasisPresetI
   'circle-annotation',
   'box-annotation',
   'bracket',
+  'squiggle',
+  'arrow',
+  'corner-marks',
 ])
 
 const INK = {
@@ -187,6 +190,60 @@ function annotationStrokes(phrase: Phrase, ox: number, oy: number, fontSize: num
       )
     }
     out.push({ paths, paint: materialFor(phrase.preset, INK.blue), width: stroke, cap: 'round' })
+    return out
+  }
+
+  if (phrase.preset === 'squiggle') {
+    const paths: string[] = []
+    forEachSweptSegment(phrase, 1, (seg, sweptTo) => {
+      const y = oy + seg.y + fontSize * 0.78 + fontSize * 0.17
+      paths.push(
+        ...sketchWavePaths(ox + seg.x0, y, ox + sweptTo, fontSize * 0.42, fontSize * 0.075, 1, rand, {
+          roughness: roughness * 0.7,
+          passes: 1,
+        }),
+      )
+    })
+    out.push({ paths, paint: materialFor(phrase.preset, INK.red), width: stroke * 0.9, cap: 'round' })
+    return out
+  }
+
+  if (phrase.preset === 'arrow') {
+    const paths: string[] = []
+    const last = phrase.segments[phrase.segments.length - 1]
+    const tipX = ox + last.x0 + (last.x1 - last.x0) * 0.5
+    const tipY = oy + last.y + fontSize * 1.1
+    const tailX = tipX - fontSize * 1.25
+    const tailY = tipY + fontSize * 0.7
+    paths.push(...sketchLinePaths(tailX, tailY, tipX, tipY, 1, rand, { roughness: roughness * 1.2, passes: 2 }))
+    const head = fontSize * 0.3
+    paths.push(...sketchLinePaths(tipX, tipY, tipX - head, tipY + head * 0.28, 1, rand, { roughness, passes: 1 }))
+    paths.push(...sketchLinePaths(tipX, tipY, tipX - head * 0.28, tipY + head, 1, rand, { roughness, passes: 1 }))
+    out.push({ paths, paint: materialFor(phrase.preset, INK.blue), width: stroke, cap: 'round' })
+    return out
+  }
+
+  if (phrase.preset === 'corner-marks') {
+    const paths: string[] = []
+    for (const seg of phrase.segments) {
+      const padX = fontSize * 0.3
+      const padY = fontSize * 0.16
+      const left = ox + seg.x0 - padX
+      const right = ox + seg.x1 + padX
+      const top = oy + seg.y - padY
+      const bottom = oy + seg.y + fontSize * 1.05 + padY * 0.5
+      const arm = fontSize * 0.26
+      for (const [cx, cy, dx, dy] of [
+        [left, top, 1, 1],
+        [right, top, -1, 1],
+        [left, bottom, 1, -1],
+        [right, bottom, -1, -1],
+      ] as [number, number, number, number][]) {
+        paths.push(...sketchLinePaths(cx, cy, cx + arm * dx, cy, 1, rand, { roughness: roughness * 0.6, passes: 1 }))
+        paths.push(...sketchLinePaths(cx, cy, cx, cy + arm * dy, 1, rand, { roughness: roughness * 0.6, passes: 1 }))
+      }
+    }
+    out.push({ paths, paint: materialFor(phrase.preset, '#2f3542'), width: stroke * 0.85, cap: 'round' })
     return out
   }
 

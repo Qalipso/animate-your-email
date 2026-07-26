@@ -37,6 +37,9 @@ export type EmphasisPresetId =
   | 'box-annotation'
   | 'strike-through'
   | 'bracket'
+  | 'squiggle'
+  | 'arrow'
+  | 'corner-marks'
 // Kept on Scene for document-model stability, but no longer affects rendering — the base
 // text layer is always fully visible from frame 1 regardless of this value (render.ts's
 // ALWAYS_VISIBLE). Not exposed as a UI choice anymore since every option would now look

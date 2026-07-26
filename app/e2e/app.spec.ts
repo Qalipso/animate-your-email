@@ -1,7 +1,7 @@
 import { expect, test } from '@playwright/test'
 
 /** Every emphasis preset offered in the picker; kept in one place so adding one fails loudly. */
-const EFFECT_COUNT = 14
+const EFFECT_COUNT = 17
 
 const LONG_TEXT = Array.from(
   { length: 9 },

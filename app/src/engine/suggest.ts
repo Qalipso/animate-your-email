@@ -35,10 +35,10 @@ export interface SuggestionRule {
  * Variety is picked by index, not at random, so the same document always suggests the same set.
  */
 const VARIANTS: Record<string, EmphasisPresetId[]> = {
-  emphasis: ['marker-highlight', 'underline-draw', 'bow-highlight'],
-  figure: ['circle-annotation', 'box-annotation', 'gentle-pop'],
+  emphasis: ['marker-highlight', 'underline-draw', 'bow-highlight', 'squiggle'],
+  figure: ['circle-annotation', 'box-annotation', 'corner-marks'],
   quotation: ['bracket', 'underline-draw'],
-  action: ['marker-highlight', 'box-annotation'],
+  action: ['marker-highlight', 'arrow'],
   motion: ['gentle-pop', 'shimmer', 'soft-glow'],
 }
 

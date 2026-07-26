@@ -1,6 +1,6 @@
 import { easeOutBack, easeOutCubic } from './easing'
 import { materialFor, paintAxis, type Paint, type PaintBox } from './materials'
-import { seededRandom, sketchEllipse, sketchLine, sketchRect } from './sketch'
+import { seededRandom, sketchEllipse, sketchLine, sketchRect, sketchWavePaths } from './sketch'
 import { FONT_FAMILY, PADDING, type Ctx2D } from './layout'
 import { DEFAULT_HOLD_MS } from './model'
 import type { AnimatedDocument, EmphasisPresetId, LayoutWord, TextLayout } from './model'
@@ -530,6 +530,79 @@ function drawPhraseOverlay(ctx: Ctx2D, phrase: Phrase, ox: number, oy: number, p
         // before it stops reading as a plain rectangle.
         { roughness: roughness * 1.9, passes: 2 },
       )
+    }
+  }
+
+  if (preset === 'squiggle') {
+    // The proofreader's mark: wavelength fixed in px so a long phrase gets more waves rather
+    // than longer ones, which is how a hand actually draws it.
+    ctx.strokeStyle = ink(INK_RED)
+    ctx.lineWidth = stroke * 0.9
+    ctx.lineCap = 'round'
+    forEachSweptSegment(phrase, eased, (seg, sweptTo) => {
+      const y = oy + seg.y + fontSize * 0.78 + fontSize * 0.17
+      for (const d of sketchWavePaths(
+        ox + seg.x0,
+        y,
+        ox + sweptTo,
+        fontSize * 0.42,
+        fontSize * 0.075,
+        1,
+        rand,
+        { roughness: roughness * 0.7, passes: 1 },
+      )) {
+        ctx.stroke(new Path2D(d))
+      }
+    })
+  }
+
+  if (preset === 'arrow') {
+    // Points up at the phrase from below-left, along a curved shaft — a straight arrow reads
+    // as a diagram, a curved one as someone pointing something out.
+    ctx.strokeStyle = ink(INK_BLUE)
+    ctx.lineWidth = stroke
+    ctx.lineCap = 'round'
+    // ONE arrow for the whole phrase, anchored under its LAST line. Drawing one per line
+    // segment put a shaft straight through the words on anything that wrapped.
+    const last = phrase.segments[phrase.segments.length - 1]
+    const tipX = ox + last.x0 + (last.x1 - last.x0) * 0.5
+    const tipY = oy + last.y + fontSize * 1.1
+    const tailX = tipX - fontSize * 1.25
+    const tailY = tipY + fontSize * 0.7
+    sketchLine(ctx, tailX, tailY, tipX, tipY, eased, rand, { roughness: roughness * 1.2, passes: 2 })
+    // The head only lands once the shaft has been drawn.
+    const headEase = clamp01((eased - 0.65) / 0.35)
+    if (headEase > 0) {
+      const head = fontSize * 0.3
+      sketchLine(ctx, tipX, tipY, tipX - head, tipY + head * 0.28, headEase, rand, { roughness, passes: 1 })
+      sketchLine(ctx, tipX, tipY, tipX - head * 0.28, tipY + head, headEase, rand, { roughness, passes: 1 })
+    }
+  }
+
+  if (preset === 'corner-marks') {
+    // Crop marks at the four corners — the quietest way to say "this bit", and the only one
+    // here that never touches the words themselves.
+    ctx.strokeStyle = ink('#2f3542')
+    ctx.lineWidth = stroke * 0.85
+    ctx.lineCap = 'round'
+    for (const seg of phrase.segments) {
+      const padX = fontSize * 0.3
+      const padY = fontSize * 0.16
+      const left = ox + seg.x0 - padX
+      const right = ox + seg.x1 + padX
+      const top = oy + seg.y - padY
+      const bottom = oy + seg.y + fontSize * 1.05 + padY * 0.5
+      const arm = fontSize * 0.26
+      const corners: [number, number, number, number][] = [
+        [left, top, 1, 1],
+        [right, top, -1, 1],
+        [left, bottom, 1, -1],
+        [right, bottom, -1, -1],
+      ]
+      for (const [cx, cy, dx, dy] of corners) {
+        sketchLine(ctx, cx, cy, cx + arm * dx, cy, eased, rand, { roughness: roughness * 0.6, passes: 1 })
+        sketchLine(ctx, cx, cy, cx, cy + arm * dy, eased, rand, { roughness: roughness * 0.6, passes: 1 })
+      }
     }
   }
 

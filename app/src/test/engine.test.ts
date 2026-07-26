@@ -367,7 +367,10 @@ describe('hand-drawn annotations', () => {
     }
   })
 
-  it.each(['circle-annotation', 'box-annotation', 'bracket', 'strike-through'] as const)(
+  it.each([
+    'circle-annotation', 'box-annotation', 'bracket', 'strike-through',
+    'squiggle', 'arrow', 'corner-marks',
+  ] as const)(
     'draws %s without disturbing the always-visible base text',
     async (preset) => {
       const doc = await buildAnimatedDocument('We shipped [[three major updates]] this quarter, finally.', {
@@ -475,7 +478,7 @@ describe('SVG export', () => {
 describe('effect hover preview', () => {
   const ALL_PRESETS = [
     'marker-highlight', 'bow-highlight', 'underline-draw', 'strike-through',
-    'circle-annotation', 'box-annotation', 'bracket',
+    'circle-annotation', 'box-annotation', 'bracket', 'squiggle', 'arrow', 'corner-marks',
     'gentle-pop', 'weight-shift', 'soft-glow', 'shimmer', 'burn', 'wash-away', 'glitch',
   ] as const
 

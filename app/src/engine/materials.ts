@@ -95,6 +95,33 @@ export const MATERIAL_BY_PRESET: Partial<Record<EmphasisPresetId, Paint>> = {
       { at: 1, colour: '#4d86ff' },
     ],
   },
+  // A proofreader's squiggle: heavier where the pen bites at the start.
+  squiggle: {
+    kind: 'gradient',
+    axis: 'along',
+    stops: [
+      { at: 0, colour: '#c8341f' },
+      { at: 1, colour: '#ef7a6a' },
+    ],
+  },
+  // The shaft lightens toward the head, the way a quick pointing stroke does.
+  arrow: {
+    kind: 'gradient',
+    axis: 'along',
+    stops: [
+      { at: 0, colour: '#5b8bff' },
+      { at: 1, colour: '#1f4fc4' },
+    ],
+  },
+  // Crop marks read as printer's furniture — even weight, no drama.
+  'corner-marks': {
+    kind: 'gradient',
+    axis: 'down',
+    stops: [
+      { at: 0, colour: '#4a5160' },
+      { at: 1, colour: '#22262f' },
+    ],
+  },
   'bracket': {
     kind: 'gradient',
     axis: 'down',

@@ -68,6 +68,9 @@ const EFFECT_GROUPS: { label: string; options: EffectOption[] }[] = [
       { id: 'box-annotation', name: 'Box It', swatch: '#2b6cff' },
       { id: 'bracket', name: 'Brackets', swatch: '#2b6cff' },
       { id: 'strike-through', name: 'Strike Through', swatch: '#e0463a' },
+      { id: 'squiggle', name: 'Squiggle', swatch: '#c8341f' },
+      { id: 'arrow', name: 'Point At It', swatch: '#1f4fc4' },
+      { id: 'corner-marks', name: 'Corner Marks', swatch: '#2f3542' },
     ],
   },
   {

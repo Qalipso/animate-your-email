@@ -161,6 +161,42 @@ export function sketchEllipse(
  * A rectangle drawn edge by edge, `progress` of the way round its perimeter — so it reads as
  * being drawn, not as fading in.
  */
+/**
+ * A wavy line — the proofreader's squiggle. The wavelength is fixed in px rather than as a
+ * fraction of the span, so a long phrase gets more waves instead of longer ones, which is how
+ * a hand actually draws it.
+ */
+export function sketchWavePaths(
+  x1: number,
+  y: number,
+  x2: number,
+  wavelength: number,
+  amplitude: number,
+  progress: number,
+  rand: () => number,
+  style: SketchStyle,
+): string[] {
+  if (progress <= 0) return []
+  const end = x1 + (x2 - x1) * progress
+  const span = end - x1
+  if (span < 1) return []
+  const steps = Math.max(6, Math.ceil(span / 3))
+  const phase = rand() * Math.PI * 2
+
+  const paths: string[] = []
+  for (let pass = 0; pass < style.passes; pass++) {
+    const drift = (rand() - 0.5) * style.roughness
+    let d = ''
+    for (let i = 0; i <= steps; i++) {
+      const px = x1 + (span * i) / steps
+      const py = y + Math.sin(phase + ((px - x1) / wavelength) * Math.PI * 2) * amplitude + drift
+      d += `${i === 0 ? 'M' : ' L'} ${n(px)} ${n(py)}`
+    }
+    paths.push(d)
+  }
+  return paths
+}
+
 export function sketchRectPaths(
   x: number,
   y: number,
